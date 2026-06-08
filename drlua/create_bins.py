@@ -8,6 +8,7 @@ import subprocess
 from datetime import datetime
 from fractions import Fraction
 from pathlib import Path
+from typing import Iterable
 
 from loguru import logger
 from tqdm import tqdm
@@ -47,6 +48,137 @@ def _load_timeline_blocks() -> tuple[str, str]:
         raise RuntimeError("lua_shared/timelines.lua is missing the aggregate split marker")
     per_bin_block, aggregate_block = timelines_content.split(split_marker, maxsplit=1)
     return per_bin_block.strip("\n"), aggregate_block.strip("\n")
+
+
+def build_release_name(
+    name: str,
+    tag: list[str],
+    section: str | None,
+    group_name: str | None,
+    date_format: DateFormatTyperOption,
+) -> ReleaseName:
+    release_name = ReleaseName()
+    release_name.addRoleValue(NameTag.Role.Name, name)
+    if date_format == DateFormatTyperOption.long:
+        release_name.addRoleValue(NameTag.Role.LongDate, True)
+    elif date_format == DateFormatTyperOption.short:
+        release_name.addRoleValue(NameTag.Role.ShortDate, True)
+    for item in tag:
+        release_name.addRoleValue(NameTag.Role.Tag, item)
+    release_name.addRoleValue(NameTag.Role.Section, section)
+    release_name.addRoleValue(NameTag.Role.Group, group_name)
+    return release_name
+
+
+def infer_source_root(media_files: list[Path], fallback: Path) -> Path:
+    if not media_files:
+        return fallback
+
+    drive_names = {path.drive.casefold() for path in media_files}
+    if len(drive_names) != 1:
+        return fallback
+
+    common_path = os.path.commonpath([str(path) for path in media_files])
+    return Path(common_path)
+
+
+def collect_clip_inputs(
+    media_files: Iterable[Path],
+    ffprobe_path: str,
+    progress_desc: str = "scan+ffprobe",
+) -> tuple[list[ClipDataInput], int]:
+    clips: list[ClipDataInput] = []
+    media_file_count = 0
+    for media_file in tqdm(media_files, desc=progress_desc, unit="clip", position=0):
+        media_file_count += 1
+        result = subprocess.run(
+            [
+                ffprobe_path,
+                "-v",
+                "error",
+                "-show_entries",
+                "stream=codec_type,codec_name,width,height,nb_frames,avg_frame_rate,r_frame_rate,duration:format=duration",
+                "-of",
+                "json",
+                str(media_file),
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if result.returncode != 0:
+            continue
+
+        file_stat = media_file.stat()
+        file_size = file_stat.st_size
+        file_ext = media_file.suffix.lower()
+        file_birth_ts = getattr(file_stat, "st_birthtime", file_stat.st_mtime)
+        file_birth_date = datetime.fromtimestamp(file_birth_ts).isoformat(timespec="seconds")
+
+        try:
+            payload = json.loads(result.stdout)
+            streams = payload.get("streams") or []
+            video_stream = next((item for item in streams if item.get("codec_type") == "video"), None)
+            if video_stream is None:
+                raise ValueError("missing video stream")
+            audio_stream = next((item for item in streams if item.get("codec_type") == "audio"), None)
+
+            width = int(video_stream.get("width") or 0)
+            height = int(video_stream.get("height") or 0)
+            fps_text = video_stream.get("avg_frame_rate") or video_stream.get("r_frame_rate") or "0/0"
+            fps = float(Fraction(str(fps_text))) if fps_text not in {"0/0", "", "0"} else 0.0
+            frames_text = str(video_stream.get("nb_frames") or "").strip()
+            frames = int(frames_text) if frames_text.isdigit() else 0
+            duration = float(video_stream.get("duration") or (payload.get("format") or {}).get("duration") or 0)
+            video_codec = str(video_stream.get("codec_name") or "unknown")
+            audio_codec = str(audio_stream.get("codec_name") or "noaudio") if audio_stream else "noaudio"
+            if not frames:
+                frames = round(float(duration) * fps) if fps and duration else 0
+            if frames <= 0:
+                raise ValueError("missing usable frame metadata")
+        except Exception:
+            continue
+
+        clips.append(
+            ClipDataInput(
+                path=media_file,
+                frames=frames,
+                fps=fps,
+                video_codec=video_codec,
+                audio_codec=audio_codec,
+                width=width,
+                height=height,
+                kind="Vertical" if height > width else "Full",
+                file_size=file_size,
+                file_ext=file_ext,
+                file_created=file_birth_date,
+            )
+        )
+
+    return clips, media_file_count
+
+
+def write_bins_script(
+    source_folder: Path,
+    release_name: ReleaseName,
+    clips: list[ClipDataInput],
+    only_bins: bool,
+    copy: bool,
+) -> Path:
+    output_bins = organize_bins(clips, release_name, 3)
+    output_path = PROCESSED_DATA_DIR / "create_bins" / release_name.file_name()
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+
+    output_path.write_text(
+        render_lua(output_path, source_folder, release_name, output_bins, not only_bins),
+        encoding="utf-8",
+        newline="\n",
+    )
+
+    typer.echo(f"Wrote Lua script: {output_path}")
+    logger.success(f"Wrote Lua script: {output_path}")
+    typer.echo(luautil.lua_dofile_hint(output_path, copy))
+    return output_path
 
 
 def render_lua(
@@ -149,98 +281,10 @@ def create_bins(
     if not ffprobe_path:
         raise RuntimeError(f"ffprobe not found: {ffprobe_path}")
 
-    clips: list[ClipDataInput] = []
-    media_file_count = 0
-    for media_file in tqdm(_iter_media_files(input_folder, recursive), desc="scan+ffprobe", unit="clip", position=0):
-        media_file_count += 1
-        result = subprocess.run(
-            [
-                ffprobe_path,
-                "-v",
-                "error",
-                "-show_entries",
-                "stream=codec_type,codec_name,width,height,nb_frames,avg_frame_rate,r_frame_rate,duration:format=duration",
-                "-of",
-                "json",
-                str(media_file),
-            ],
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-        if result.returncode != 0:
-            continue
-
-        file_stat = media_file.stat()
-        file_size = file_stat.st_size
-        file_ext = media_file.suffix.lower()
-        file_birth_ts = getattr(file_stat, "st_birthtime", file_stat.st_birthtime)
-        file_birth_date = datetime.fromtimestamp(file_birth_ts).isoformat(timespec="seconds")
-
-        try:
-            payload = json.loads(result.stdout)
-            streams = payload.get("streams") or []
-            video_stream = next((item for item in streams if item.get("codec_type") == "video"), None)
-            if video_stream is None:
-                raise ValueError("missing video stream")
-            audio_stream = next((item for item in streams if item.get("codec_type") == "audio"), None)
-
-            width = int(video_stream.get("width") or 0)
-            height = int(video_stream.get("height") or 0)
-            fps_text = video_stream.get("avg_frame_rate") or video_stream.get("r_frame_rate") or "0/0"
-            fps = float(Fraction(str(fps_text))) if fps_text not in {"0/0", "", "0"} else 0.0
-            frames_text = str(video_stream.get("nb_frames") or "").strip()
-            frames = int(frames_text) if frames_text.isdigit() else 0
-            duration = float(video_stream.get("duration") or (payload.get("format") or {}).get("duration") or 0)
-            video_codec = str(video_stream.get("codec_name") or "unknown")
-            audio_codec = str(audio_stream.get("codec_name") or "noaudio") if audio_stream else "noaudio"
-            if not frames:
-                frames = round(float(duration) * fps) if fps and duration else 0
-            if frames <= 0:
-                raise ValueError("missing usable frame metadata")
-        except Exception:
-            continue
-
-        clips.append(
-            ClipDataInput(
-                path=media_file,
-                frames=frames,
-                fps=fps,
-                video_codec=video_codec,
-                audio_codec=audio_codec,
-                width=width,
-                height=height,
-                kind="Vertical" if height > width else "Full",
-                file_size=file_size,
-                file_ext=file_ext,
-                file_created=file_birth_date,
-            )
-        )
+    clips, media_file_count = collect_clip_inputs(_iter_media_files(input_folder, recursive), ffprobe_path)
 
     if media_file_count == 0:
         raise RuntimeError(f"No supported media files found in {input_folder}")
 
-    release_name = ReleaseName()
-    release_name.addRoleValue(NameTag.Role.Name, name)
-    if date_format == DateFormatTyperOption.long:
-        release_name.addRoleValue(NameTag.Role.LongDate, True)
-    elif date_format == DateFormatTyperOption.short:
-        release_name.addRoleValue(NameTag.Role.ShortDate, True)
-    for item in tag:
-        release_name.addRoleValue(NameTag.Role.Tag, item)
-    release_name.addRoleValue(NameTag.Role.Section, section)
-    release_name.addRoleValue(NameTag.Role.Group, group_name)
-    output_bins = organize_bins(clips, release_name, 3)
-    output_path = PROCESSED_DATA_DIR / "create_bins" / release_name.file_name()
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-
-    output_path.write_text(
-        render_lua(output_path, input_folder, release_name, output_bins, not only_bins),
-        encoding="utf-8",
-        newline="\n",
-    )
-
-    typer.echo(f"Wrote Lua script: {output_path}")
-
-    logger.success(f"Wrote Lua script: {output_path}")
-    typer.echo(luautil.lua_dofile_hint(output_path, copy))
+    release_name = build_release_name(name, tag, section, group_name, date_format)
+    write_bins_script(input_folder, release_name, clips, only_bins, copy)
