@@ -1,0 +1,9 @@
+[tools]
+python = "3.12.9"
+uv = "latest"
+
+
+[env]
+_.path = ["./.venv", "./.venv/Scripts"]
+[tasks.convert_ui_to_py]
+run = 'QtResolve\ui\core\convert_ui_to_py.bat'
