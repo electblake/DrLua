@@ -36,7 +36,10 @@ class ReleaseName:
 
     def parent_text(self):
         name = self.tagWithRole(NameTag.Role.Name)
-        return name.text() if name is not None else self.text()
+        date = self.tagWithRole(NameTag.Role.LongDate) or self.tagWithRole(NameTag.Role.ShortDate)
+        date = date.text() if date else ""
+        name = name.text() if name is not None else self.text()
+        return f"{name}{SCENE_NAME_SEP}{date}"
 
     def file_name(self):
         return Path(f"{self.text()}.lua")

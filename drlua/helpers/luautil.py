@@ -12,9 +12,12 @@ def lua_list(list_obj: list[str] | None) -> str:
     list_obj = list_obj if list_obj is not None else []
     return "{ " + ", ".join(lua_string(str(item)) for item in list_obj) + " }"
 
-def lua_dofile_hint(file: str | Path, copy: bool = False) -> str:
+def lua_dofile_command(file: str | Path) -> str:
     file_path = Path(file)
-    dofile = f"\tdofile([[{file_path.resolve()}]])"
+    return f"\tdofile([[{file_path.resolve()}]])"
+
+def lua_dofile_hint(file: str | Path, copy: bool = False) -> str:
+    dofile = lua_dofile_command(file)
     hint = [
         "> Paste into the DaVinci Resolve Lua console:",
         "```",
