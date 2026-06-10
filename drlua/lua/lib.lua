@@ -39,17 +39,14 @@ function CreateBins(payload)
         local TotalFrames = 0
 
         for _, bin in ipairs(bins) do
-            for _, clip in ipairs(bin.clips or {}) do
-                TotalClips = TotalClips + 1
-                TotalFrames = TotalFrames + (tonumber(clip.frame_number) or 0)
-            end
+            TotalFrames = TotalFrames + (tonumber(bin.total_frames) or 0)
+            TotalClips = TotalClips + #bin.clips
         end
 
         return TotalClips, TotalFrames
     end
 
     TotalClips, TotalFrames = clip_totals(bins)
-    local all_kinds = {}
     local seen_kinds = {}
 
     print("[CreateBins] Created parent bin: " .. parent_name .. " total_clips: " .. TotalClips .. "(" .. TotalFrames .. ")")
@@ -62,7 +59,7 @@ function CreateBins(payload)
 
             if not seen_kinds[kind] then
                 seen_kinds[kind] = true
-                all_kinds[#all_kinds + 1] = kind
+                seen_kinds[#seen_kinds + 1] = kind
             end
 
             local taken = {}
@@ -129,7 +126,7 @@ function CreateBins(payload)
     end
 
     if create_timelines then
-        for _, kind in ipairs(all_kinds) do
+        for _, kind in ipairs(seen_kinds) do
             media_pool:SetCurrentFolder(parent_folder)
             local aggregate_name = release_name .. scene_rules_sep .. kind
             local aggregate = media_pool:CreateEmptyTimeline(aggregate_name)

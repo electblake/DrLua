@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Iterable, Mapping
 import enum
 from pathlib import Path
 import re
@@ -9,10 +10,12 @@ from functools import total_ordering
 from drlua.config import SCENE_NAME_SEP, DateFormatTyperOption
 
 class ReleaseName:
-    _tags: set[NameTag]
+    _name_tags: set[NameTag]
 
     def __init__(self, **kwargs):
-        self._tags = set()
+        self._name_tags = set()
+        if name_tags := kwargs.get("name_tags"):
+            self._add_name_tags(name_tags)
         if name := kwargs.get("name"):
             self.addRoleValue(NameTag.Role.Name, name)
         if date_format := kwargs.get("date_format"):
@@ -28,14 +31,38 @@ class ReleaseName:
         if group_name := kwargs.get("group_name"):
             self.addRoleValue(NameTag.Role.Group, group_name)
 
+    def _add_name_tags(self, name_tags: object) -> None:
+        if isinstance(name_tags, ReleaseName):
+            self._name_tags.update(name_tags._name_tags)
+            return
+        if isinstance(name_tags, NameTag):
+            self._name_tags.add(name_tags)
+            return
+        if isinstance(name_tags, Mapping):
+            for role, value in name_tags.items():
+                self.addRoleValue(role, value)
+            return
+        if isinstance(name_tags, Iterable) and not isinstance(name_tags, str):
+            for item in name_tags:
+                if isinstance(item, NameTag):
+                    self._name_tags.add(item)
+                    continue
+                if isinstance(item, tuple) and len(item) == 2:
+                    role, value = item
+                    self.addRoleValue(role, value)
+                    continue
+                raise TypeError(f"Unsupported name_tags item: {item!r}")
+            return
+        raise TypeError(f"Unsupported name_tags value: {name_tags!r}")
+
     def addRoleValue(self, role: int, value):
         if value is None:
             return
         tag = NameTag(role, value)
-        self._tags.add(tag)
+        self._name_tags.add(tag)
 
     def text(self):
-        tags = sorted(self._tags)
+        tags = sorted(self._name_tags)
         group = [t for t in tags if t.role == NameTag.Role.Group]
         normal = [t for t in tags if t.role != NameTag.Role.Group]
 
@@ -47,16 +74,16 @@ class ReleaseName:
         return text
 
     def tagWithRole(self, role: int) -> NameTag | None:
-        matches = sorted(tag for tag in self._tags if tag.role == role)
+        matches = sorted(tag for tag in self._name_tags if tag.role == role)
         return matches[0] if matches else None
 
     def tagsWithRole(self, role: int) -> list[NameTag]:
-        return sorted(tag for tag in self._tags if tag.role == role)
+        return sorted(tag for tag in self._name_tags if tag.role == role)
 
     def textWithRole(self, role: int) -> str | None:
         tag = self.tagWithRole(role)
         return tag.text() if tag is not None else None
-    def text_tags(self):
+    def text_name_tags(self):
         return [tag_item.text() for tag_item in self.tagsWithRole(NameTag.Role.Tag)]
 
     def parent_text(self):
