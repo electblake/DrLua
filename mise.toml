@@ -5,5 +5,7 @@ uv = "latest"
 
 [env]
 _.path = ["./.venv", "./.venv/Scripts"]
-[tasks.convert_ui_to_py]
-run = 'QtResolve\ui\core\convert_ui_to_py.bat'
+UV_LINK_MODE="copy"
+
+[tasks.compile]
+run = "uv run pyinstaller --onefile --name drlua --distpath dist drlua/cli.py"

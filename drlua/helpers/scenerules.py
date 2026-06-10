@@ -6,13 +6,27 @@ import re
 from datetime import datetime
 from functools import total_ordering
 
-from drlua.config import SCENE_NAME_SEP
+from drlua.config import SCENE_NAME_SEP, DateFormatTyperOption
 
 class ReleaseName:
     _tags: set[NameTag]
 
-    def __init__(self):
+    def __init__(self, **kwargs):
         self._tags = set()
+        if name := kwargs.get("name"):
+            self.addRoleValue(NameTag.Role.Name, name)
+        if date_format := kwargs.get("date_format"):
+            if date_format == DateFormatTyperOption.long:
+                self.addRoleValue(NameTag.Role.LongDate, True)
+            elif date_format == DateFormatTyperOption.short:
+                self.addRoleValue(NameTag.Role.ShortDate, True)
+        if tag := kwargs.get("tag"):
+            for item in tag:
+                self.addRoleValue(NameTag.Role.Tag, item)
+        if section := kwargs.get("section"):
+            self.addRoleValue(NameTag.Role.Section, section)
+        if group_name := kwargs.get("group_name"):
+            self.addRoleValue(NameTag.Role.Group, group_name)
 
     def addRoleValue(self, role: int, value):
         if value is None:
@@ -21,7 +35,16 @@ class ReleaseName:
         self._tags.add(tag)
 
     def text(self):
-        return SCENE_NAME_SEP.join([t.text() for t in sorted(self._tags)])
+        tags = sorted(self._tags)
+        group = [t for t in tags if t.role == NameTag.Role.Group]
+        normal = [t for t in tags if t.role != NameTag.Role.Group]
+
+        text = SCENE_NAME_SEP.join(t.text() for t in normal)
+
+        if group:
+            return f"{text}-{group[0].text()}"
+
+        return text
 
     def tagWithRole(self, role: int) -> NameTag | None:
         matches = sorted(tag for tag in self._tags if tag.role == role)
@@ -33,6 +56,8 @@ class ReleaseName:
     def textWithRole(self, role: int) -> str | None:
         tag = self.tagWithRole(role)
         return tag.text() if tag is not None else None
+    def text_tags(self):
+        return [tag_item.text() for tag_item in self.tagsWithRole(NameTag.Role.Tag)]
 
     def parent_text(self):
         name = self.tagWithRole(NameTag.Role.Name)
