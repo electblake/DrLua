@@ -148,11 +148,10 @@ def _extract_file_info(lua_file: Path) -> dict[str, str]:
     lua_text = lua_file.read_text(encoding="utf-8")
     release_name = _find_first_string_match(lua_text, RELEASE_NAME_PATTERNS)
     source_path = _find_first_string_match(lua_text, SOURCE_PATH_PATTERNS)
-    release_source = release_name or lua_file.stem
-    parsed_release = scene_release_to_string(parse_scene_release(release_source))
+    fallback_release_name = scene_release_to_string(parse_scene_release(lua_file.stem))
 
     return {
-        "release_name": parsed_release or release_source or "<not found>",
+        "release_name": release_name or fallback_release_name or lua_file.stem or "<not found>",
         "source_path": source_path or "<not found>",
     }
 
