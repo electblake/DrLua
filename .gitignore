@@ -10,3 +10,5 @@ wheels/
 .venv
 temp_files/
 .pytest_cache
+.ruff_cache
+.vscode
