@@ -14,6 +14,10 @@ logger.trace(f"PROJ_ROOT path is: {PROJ_ROOT}")
 PROJ_ROOT.mkdir(exist_ok=True, parents=True)
 LUA_DIR.mkdir(exist_ok=True, parents=True)
 
+STASH_MAP = {
+    "/X3": "X:"
+}
+
 DATA_DIR = dirs.user_data_path
 logger.trace(f"DATA_DIR path is: {DATA_DIR}")
 if not DATA_DIR.exists():

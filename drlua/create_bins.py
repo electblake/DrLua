@@ -8,7 +8,7 @@ import subprocess
 
 from datetime import datetime
 from fractions import Fraction
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 from loguru import logger
 import pyperclip
@@ -17,6 +17,7 @@ from drlua.config import (
     LUA_DIR,
     PROCESSED_DATA_DIR,
     SCENE_NAME_SEP,
+    STASH_MAP,
     SUPPORTED_EXTENSIONS,
     DateFormatTyperOption,
     version_callback,
@@ -147,6 +148,43 @@ def collect_metadata_csv_media_files(input_file: Path):
             media_file = (Path(row["Clip Directory"].strip()) / row["File Name"].strip()).resolve()
             if media_file.suffix.lower() in SUPPORTED_EXTENSIONS:
                 media_files.append(media_file)
+    return media_files
+
+def collect_stash_export_media_files(input_path: Path):
+    def map_stash_path(raw_path: str) -> Path | None:
+        posix_path = PurePosixPath(raw_path.strip())
+
+        for stash_prefix, local_prefix in STASH_MAP.items():
+            stash_parts = PurePosixPath(stash_prefix).parts
+            if posix_path.parts[: len(stash_parts)] != stash_parts:
+                continue
+
+            relative_parts = posix_path.parts[len(stash_parts) :]
+            return Path(local_prefix, *relative_parts).expanduser()
+
+        if ":" in raw_path:
+            return Path(raw_path).expanduser()
+
+        return Path(*posix_path.parts[1:]).expanduser() if posix_path.is_absolute() else Path(*posix_path.parts).expanduser()
+
+    media_files: list[Path] = []
+    for export_json in input_path.glob("**/*.json"):
+        with export_json.open("r", encoding="utf-8") as fp:
+            data = json.load(fp)
+
+        for raw_path in data.get("files", []):
+            if not isinstance(raw_path, str) or not raw_path.strip():
+                continue
+
+            media_file = map_stash_path(raw_path)
+            if media_file is None:
+                continue
+            if media_file.suffix.lower() not in SUPPORTED_EXTENSIONS:
+                continue
+            if not media_file.exists() or not media_file.is_file():
+                continue
+            media_files.append(media_file.resolve())
+
     return media_files
 
 
@@ -339,12 +377,14 @@ def create_bins(
         if use_parent:
             input_location = input_location.parent
         else:
-            raise typer.Abort(f"No supported media files location provided. {input}")
+            raise typer.Abort(f"No supported media files location provided. {input_location}")
 
     logger.debug(f"Collecting from {input_location}")
 
     if input_location.is_dir():
         media_files = collect_folder_media_files(input_location, recursive)
+        if len(media_files) == 0 and len(list(input_location.glob("**/*.json"))) > 0:
+            media_files = collect_stash_export_media_files(input_location)
     elif input_location.is_file() and input_location.suffix == ".efu":
         media_files = collect_efu_media_files(input_location)
     elif input_location.is_file() and input_location.suffix == ".csv":
@@ -353,7 +393,7 @@ def create_bins(
         raise RuntimeError("Could not process input location")
 
     if len(media_files) == 0:
-        raise RuntimeError(f"No supported media files found in {input}")
+        raise RuntimeError(f"No supported media files found in {input_location}")
 
     logger.debug(f"Collected {len(media_files)} media files..")
 
