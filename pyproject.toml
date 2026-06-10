@@ -3,9 +3,9 @@ requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "drlua"
-version = "0.0.1"
-description = "Add your description here"
+name = "DrLua"
+version = "0.1.1"
+description = "DrLua writes lua scripts for Davinci Resolve to automate media imports and timeline creation"
 requires-python = ">=3.12"
 dependencies = [
     "iterfzf>=1.9.0.67.0",
