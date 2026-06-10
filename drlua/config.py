@@ -1,8 +1,8 @@
 import enum
 from importlib import resources
 
+import typer
 from loguru import logger
-
 from platformdirs import PlatformDirs
 
 dirs = PlatformDirs("DrLua", "DrLua")
@@ -68,8 +68,6 @@ SUPPORTED_EXTENSIONS = {
 }
 
 
-import typer
-from typing import Annotated
 def version_callback(value: bool):
     if value:
         from drlua import __version__
