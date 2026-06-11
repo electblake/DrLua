@@ -11,7 +11,6 @@ from fractions import Fraction
 from pathlib import Path, PurePosixPath
 
 from loguru import logger
-import pyperclip
 from tqdm import tqdm
 from drlua.config import (
     LUA_DIR,
@@ -19,10 +18,7 @@ from drlua.config import (
     SCENE_NAME_SEP,
     STASH_MAP,
     SUPPORTED_EXTENSIONS,
-    DateFormatTyperOption,
-    version_callback,
 )
-import typer
 
 from drlua.helpers.distribute import VideoItem, split_videos_by_frame_count
 from drlua.helpers.scenerules import NameTag, ReleaseName
@@ -30,7 +26,51 @@ from drlua.helpers.scenerules import NameTag, ReleaseName
 import luadata
 from drlua import __version__
 
-create_bins_app = typer.Typer()
+
+def _ask_yes_no(prompt: str, default: bool = False) -> bool:
+    suffix = " [Y/n]" if default else " [y/N]"
+    while True:
+        response = input(f"{prompt}{suffix} ").strip().lower()
+        if not response:
+            return default
+        if response in {"y", "yes"}:
+            return True
+        if response in {"n", "no"}:
+            return False
+
+
+def default_release_name_from_input(input_location: Path) -> str:
+    target = input_location.parent if input_location.is_file() else input_location
+    if target.name:
+        return target.name
+    if input_location.is_file() and input_location.stem:
+        return input_location.stem
+    return target.anchor.rstrip("\\/") or "Release"
+
+
+def prompt_for_section(section_tags: list[str]) -> str:
+    other_label = "Other"
+    choices = ", ".join(section_tags + [other_label])
+    section_choice = input(f"Enter section ({choices}) [{section_tags[0]}]: ").strip()
+    if not section_choice:
+        return section_tags[0]
+    if section_choice != other_label:
+        return section_choice
+
+    custom_section = ""
+    while not custom_section:
+        custom_section = input("Enter custom section: ").strip()
+    return custom_section
+
+
+def prompt_for_tags() -> list[str]:
+    tags: list[str] = []
+    while True:
+        tag_value = input("Enter tag (leave blank to continue): ").strip()
+        if not tag_value:
+            return tags
+        tags.append(tag_value)
+
 
 def lua_header(release_name:ReleaseName, input_location: str|Path, outfile:str|Path):
     from datetime import datetime
@@ -284,7 +324,7 @@ def make_bin_groups(clips, release_name: ReleaseName, include_kinds):
         full = [clip for clip in bucket["clips"] if clip.kind == "Full"]
         vertical.sort(key=lambda item: (item.frames, item.path.name.lower()))
         full.sort(key=lambda item: (item.frames, item.path.name.lower()))
-        if "Vertical" in include_kinds:
+        if "Vertical" in include_kinds and vertical:
             output_bins.append(
                 ClipBinGroup(
                     clips=vertical,
@@ -296,7 +336,7 @@ def make_bin_groups(clips, release_name: ReleaseName, include_kinds):
                     total_frames=sum(clip.frames for clip in vertical),
                 )
             )
-        if "Full" in include_kinds:
+        if "Full" in include_kinds and full:
             output_bins.append(
                 ClipBinGroup(
                     clips=full,
@@ -351,33 +391,50 @@ def make_payload(
         bins=payload_bins,
     ))
 
+section_tags = ["Fansites", "Civilians", "Inspired"]
 
-@create_bins_app.command()
+
 def create_bins(
-    from_location: Path = typer.Argument(..., exists=True, dir_okay=True, file_okay=True, resolve_path=True),
-    name: str = typer.Option(..., "--name"),
-    section: str | None = typer.Option(None, "--section"),
-    group_name: str | None = typer.Option(None, "--group"),
-    tag: list[str] = typer.Option([], "--tag"),
-    date_format: DateFormatTyperOption = typer.Option(DateFormatTyperOption.long, '--date', show_default=True),
-    recursive: bool = typer.Option(True, "--recursive", metavar="FLAG"),
-    copy: bool = typer.Option(False, "--copy", metavar="FLAG"),
-    copy_all: bool = typer.Option(False, "--copy-all", metavar="FLAG"),
-    vertical_only: bool = typer.Option(False, "--vertical", help="only clips where aspect-ratio < 1"),
-    full_only: bool = typer.Option(False, "--full", help="only clips where aspect-ratio > 1"),
-    bins_only: bool = typer.Option(False, "--bins", metavar="FLAG", show_default=True, help="only bins no timelines"),
-    version: bool = typer.Option(False, "--version", callback=version_callback),
-):
+    from_location: Path,
+    name: str | None = None,
+    section: str | None = None,
+    tag: list[str] | None = None,
+    group_name: str | None = None,
+    recursive: bool = True,
+    vertical_only: bool = False,
+    full_only: bool = False,
+    bins_only: bool = False,
+    version: bool = False,
+) -> int | None:
+    if version:
+        from drlua import __version__
+        print(__version__)
+        print(f"DrLua Version: {__version__}")
+        return 0
+
+    tag = list(tag or [])
     input_location = Path(from_location).expanduser().resolve()
+    name = name.strip() if name else None
+    section = section.strip() if section else None
+    tag = [item.strip() for item in tag if item and item.strip()]
 
     media_files = []
     if input_location.is_file() and input_location.suffix in SUPPORTED_EXTENSIONS:
-        typer.echo(f"Cannot use {input_location.suffix} file ({input_location.as_posix()})")
-        use_parent = typer.confirm("Use file parent as input instead?")
+        print(f"Cannot use {input_location.suffix} file ({input_location.as_posix()})")
+        use_parent = _ask_yes_no("Use file parent as input instead?")
         if use_parent:
             input_location = input_location.parent
         else:
-            raise typer.Abort(f"No supported media files location provided. {input_location}")
+            raise RuntimeError(f"No supported media files location provided. {input_location}")
+
+    if not name:
+        default_name = default_release_name_from_input(input_location)
+        while not name:
+            name = input(f"Enter name [{default_name}]: ").strip() or default_name
+    if not section:
+        section = prompt_for_section(section_tags)
+    if not tag:
+        tag = prompt_for_tags()
 
     logger.debug(f"Collecting from {input_location}")
 
@@ -405,12 +462,14 @@ def create_bins(
     logger.info(f"Converted to {len(clips)} clips..")
 
     release_name = ReleaseName(**locals())
-    logger.trace(f"Release name {release_name}")
+    logger.info(f"Release name {release_name.text()}")
 
     out_file_path = PROCESSED_DATA_DIR / "create_bins" / release_name.file_name()
     include_kinds = make_include_kinds_from_args(vertical_only, full_only)
 
     output_bins = make_bin_groups(clips, release_name, include_kinds)
+    if len(output_bins) == 0:
+        raise RuntimeError(f"No output bins could be created for kinds: {', '.join(include_kinds)}")
     logger.debug(f"Made bins({len(output_bins)}) with total_frames {[o.total_frames for o in output_bins]}")
 
     payload = make_payload(release_name, output_bins, not bins_only, include_kinds)
@@ -431,32 +490,13 @@ def create_bins(
 
     output_lua = "\n".join(output_lines)
 
-    if copy_all:
-        logger.success(f"Copying stand-alone Lua script {len(output_lua)}) to clipboard..")
-        pyperclip.copy(output_lua)
-        logger.success("Done!")
-
-        hint = [
-            "**Full Script has been copied to clipboard, it starts with..:**",
-            "```",
-            *output_lua.split("\n")[:4],
-            "```",
-        ]
-        typer.echo("\n".join(hint))
-        return typer.Exit(0)
-
     out_file_path.write_text(output_lua, encoding="utf-8", newline="\n",)
     logger.success(f"Saved file {out_file_path.name}")
     dofile = f"\tdofile([[{out_file_path.expanduser().resolve().as_posix()}]])"
-
-    if copy:
-        logger.info("Copying dofile..")
-        pyperclip.copy(dofile)
-        logger.success("Done!")
-        hint = [
-            "**Paste into the DaVinci Resolve Lua console:**",
-            "```",
-            dofile,
-            "```",
-        ]
-        typer.echo("\n".join(hint))
+    hint = [
+        "**Paste into the DaVinci Resolve Lua console:**",
+        "```",
+        dofile,
+        "```",
+    ]
+    print("\n".join(hint))

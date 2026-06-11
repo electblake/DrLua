@@ -2,18 +2,15 @@ from __future__ import annotations
 
 import json
 import re
+import shutil
+from datetime import datetime
 
 from pathlib import Path
 
 from iterfzf import iterfzf
 
-import pyperclip
-import typer
-
 from drlua.config import DATA_DIR
 from drlua.helpers.scene_release import parse_scene_release, scene_release_to_string
-
-files_app = typer.Typer()
 
 DATE_PATTERN = re.compile(r"\d{4}\.\d{2}\.\d{2}(?:-\d{6})?")
 RELEASE_NAME_PATTERNS = (
@@ -24,6 +21,64 @@ SOURCE_PATH_PATTERNS = (
     re.compile(r'(?m)^[ \t]*(?:\[\s*["\']source_folder["\']\s*\]|SOURCE_FOLDER)\s*=\s*"([^"\r\n]+)"'),
     re.compile(r'(?m)^[ \t]*(?:\[\s*["\']path["\']\s*\]|path)\s*=\s*"([^"\r\n]+)"'),
 )
+
+
+def _resolve_fzf_executable() -> str | None:
+    return shutil.which("fzf.exe") or shutil.which("fzf")
+
+
+def _iterfzf_select(
+    labels: list[str],
+    *,
+    prompt: str,
+    header: str,
+    multi: bool = False,
+    query: str = "",
+) -> str | list[str] | None:
+    fzf_executable = _resolve_fzf_executable()
+    if fzf_executable:
+        try:
+            return iterfzf(
+                labels,
+                multi=multi,
+                prompt=prompt,
+                header=header,
+                query=query,
+                cycle=True,
+                executable=fzf_executable,
+                __extra__=("--layout=default",),
+            )
+        except FileNotFoundError:
+            pass
+        except KeyboardInterrupt:
+            return None
+
+    print(header)
+    for index, label in enumerate(labels, start=1):
+        print(f"{index}. {label}")
+
+    if multi:
+        response = input("Select number(s), comma-separated: ").strip()
+        if not response.strip():
+            return None
+        selected_labels: list[str] = []
+        for raw_index in response.split(","):
+            value = raw_index.strip()
+            if not value:
+                continue
+            index = int(value)
+            if index < 1 or index > len(labels):
+                raise RuntimeError(f"Selection out of range: {value}")
+            selected_labels.append(labels[index - 1])
+        return selected_labels
+
+    response = input("Select number: ").strip()
+    if not response.strip():
+        return None
+    index = int(response.strip())
+    if index < 1 or index > len(labels):
+        raise RuntimeError(f"Selection out of range: {response}")
+    return labels[index - 1]
 
 
 def _select_data_directory() -> Path | None:
@@ -39,11 +94,10 @@ def _select_data_directory() -> Path | None:
         directory_by_label[label] = directory
 
     try:
-        selected_directory = iterfzf(
+        selected_directory = _iterfzf_select(
             directory_labels,
             prompt="Data dir> ",
             header=f"Select a subdirectory from {DATA_DIR}",
-            cycle=True,
         )
     except KeyboardInterrupt:
         selected_directory = None
@@ -54,16 +108,18 @@ def _select_data_directory() -> Path | None:
 
 
 def _available_lua_files(selected_dir: Path) -> tuple[list[str], dict[str, Path]]:
-    matches = sorted(
-        (
-            path
-            for path in selected_dir.rglob("*.lua")
-            if "done" not in {part.casefold() for part in path.relative_to(selected_dir).parts}
-        ),
-        key=lambda path: path.name.casefold(),
-    )
+    matches = [
+        path
+        for path in selected_dir.rglob("*.lua")
+        if "done" not in {part.casefold() for part in path.relative_to(selected_dir).parts}
+    ]
     if not matches:
         raise RuntimeError(f"No available Lua files found under selected directory: {selected_dir}")
+
+    matches.sort(
+        key=lambda path: _lua_file_date(path) or datetime.min,
+        reverse=True,
+    )
 
     file_labels: list[str] = []
     file_by_label: dict[str, Path] = {}
@@ -84,15 +140,30 @@ def _available_lua_files(selected_dir: Path) -> tuple[list[str], dict[str, Path]
     return file_labels, file_by_label
 
 
+def _lua_file_date(file_path: Path) -> datetime | None:
+    match = DATE_PATTERN.search(file_path.stem)
+    if not match:
+        return None
+    date_text = match.group(0)
+    if "-" in date_text:
+        try:
+            return datetime.strptime(date_text, "%Y.%m.%d-%H%M%S")
+        except ValueError:
+            return None
+    try:
+        return datetime.strptime(date_text, "%Y.%m.%d")
+    except ValueError:
+        return None
+
+
 def _select_files(file_labels: list[str], selected_dir: Path, query: str) -> list[str]:
     try:
-        selected_files = iterfzf(
+        selected_files = _iterfzf_select(
             file_labels,
-            multi=True,
             prompt=f"{selected_dir.name}> ",
             header="Tab marks files. Enter confirms.",
+            multi=True,
             query=query,
-            cycle=True,
         )
     except KeyboardInterrupt:
         selected_files = None
@@ -110,7 +181,7 @@ def _select_files(file_labels: list[str], selected_dir: Path, query: str) -> lis
 
 def _select_action(selected_files: list[Path]) -> str | None:
     actions = [
-        ("dofile", "Copy dofile command(s) to clipboard"),
+        ("dofile", "Print dofile command(s)"),
         ("info", "Show release name and source path"),
         ("delete", "Delete the selected file(s)"),
     ]
@@ -118,11 +189,10 @@ def _select_action(selected_files: list[Path]) -> str | None:
     action_by_label = {f"{name}\t{description}": name for name, description in actions}
 
     try:
-        selected_action = iterfzf(
+        selected_action = _iterfzf_select(
             action_labels,
             prompt="Action> ",
             header=f"Choose action for {len(selected_files)} selected file(s)",
-            cycle=True,
         )
     except KeyboardInterrupt:
         selected_action = None
@@ -156,29 +226,29 @@ def _extract_file_info(lua_file: Path) -> dict[str, str]:
     }
 
 
-def _copy_dofile_commands(selected_files: list[Path]) -> None:
+def _print_dofile_commands(selected_files: list[Path]) -> None:
     dofile_commands = [f"dofile([[{file_path.as_posix()}]])" for file_path in selected_files]
-    pyperclip.copy("\n".join(dofile_commands))
 
-    typer.echo(f"Copied {len(dofile_commands)} dofile command(s) to clipboard:")
+    print(f"Dofile command(s) for {len(dofile_commands)} selected file(s):")
     for command in dofile_commands:
-        typer.echo(command)
+        print(command)
 
 
 def _show_info(selected_files: list[Path]) -> None:
     for index, file_path in enumerate(selected_files):
         info = _extract_file_info(file_path)
         if index:
-            typer.echo("")
-        typer.echo(file_path.as_posix())
-        typer.echo(json.dumps(info, indent=2, ensure_ascii=True))
+            print("")
+        print(file_path.as_posix())
+        print(json.dumps(info, indent=2, ensure_ascii=True))
 
 
 def _delete_files(selected_files: list[Path]) -> None:
     file_count = len(selected_files)
-    confirmed = typer.confirm(f"Delete {file_count} selected file(s)?", default=False)
+    response = input(f"Delete {file_count} selected file(s)? [y/N]: ").strip().lower()
+    confirmed = response in {"y", "yes"}
     if not confirmed:
-        typer.echo("Delete cancelled.")
+        print("Delete cancelled.")
         return
 
     deleted_count = 0
@@ -186,12 +256,11 @@ def _delete_files(selected_files: list[Path]) -> None:
         file_path.unlink(missing_ok=False)
         deleted_count += 1
 
-    typer.echo(f"Deleted {deleted_count} file(s).")
+    print(f"Deleted {deleted_count} file(s).")
 
 
-@files_app.command("files")
 def files_command(
-    name: str | None = typer.Argument(None, help="Optional initial filter for Lua filenames."),
+    name: str | None = None,
 ) -> None:
     query = name.strip() if name is not None else ""
     if name is not None and not query:
@@ -199,23 +268,23 @@ def files_command(
 
     selected_dir = _select_data_directory()
     if selected_dir is None:
-        typer.echo("No directory selected.")
+        print("No directory selected.")
         return
 
     file_labels, file_by_label = _available_lua_files(selected_dir)
     selected_labels = _select_files(file_labels, selected_dir, query)
     if not selected_labels:
-        typer.echo("No file selected.")
+        print("No file selected.")
         return
 
     selected_files = [file_by_label[label] for label in selected_labels]
     action = _select_action(selected_files)
     if action is None:
-        typer.echo("No action selected.")
+        print("No action selected.")
         return
 
     if action == "dofile":
-        _copy_dofile_commands(selected_files)
+        _print_dofile_commands(selected_files)
         return
     if action == "info":
         _show_info(selected_files)

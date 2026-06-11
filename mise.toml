@@ -8,4 +8,4 @@ _.path = ["./.venv", "./.venv/Scripts"]
 UV_LINK_MODE="copy"
 
 [tasks.compile]
-run = "uv run pyinstaller --onefile --name drlua --distpath dist drlua/cli.py"
+run = "uv run pyinstaller drlua.spec"

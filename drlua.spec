@@ -1,16 +1,17 @@
 # -*- mode: python ; coding: utf-8 -*-
 
-from PyInstaller.utils.hooks import collect_data_files
-
-
-datas = collect_data_files("drlua")
 
 a = Analysis(
     ['drlua\\cli.py'],
     pathex=[],
     binaries=[],
-    datas=datas,
-    hiddenimports=[],
+    datas=[
+        ('drlua\\lua\\*.lua', 'drlua\\lua'),
+        ('drlua\\fusion\\*.setting', 'drlua\\fusion'),
+        ('scripts\\Enter-Interactive.ps1', 'drlua\\scripts'),
+        ('scripts\\Categories.psd1', 'drlua\\scripts'),
+    ],
+    hiddenimports=['drlua.interactive'],
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
