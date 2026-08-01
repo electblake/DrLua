@@ -13,6 +13,7 @@ run = "uv run python -I -m PyInstaller --clean drlua.spec"
 [tasks.release]
 description = "Compile DrLua and publish the current version to GitHub"
 depends = ["compile"]
+shell = "pwsh -NoProfile -Command"
 run_windows = '''
 $version = uv run python -c "import tomllib; print(tomllib.load(open('pyproject.toml', 'rb'))['project']['version'])"
 $arch = [System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture.ToString().ToLowerInvariant()
