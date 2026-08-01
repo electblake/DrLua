@@ -10,11 +10,9 @@ dirs = PlatformDirs("DrLua", "DrLua")
 # Paths
 PROJ_ROOT = dirs.user_config_path
 LUA_DIR = PROJ_ROOT / "lua"
-SCRIPTS_DIR = PROJ_ROOT / "scripts"
 logger.trace(f"PROJ_ROOT path is: {PROJ_ROOT}")
 PROJ_ROOT.mkdir(exist_ok=True, parents=True)
 LUA_DIR.mkdir(exist_ok=True, parents=True)
-SCRIPTS_DIR.mkdir(exist_ok=True, parents=True)
 
 STASH_MAP = {
     "/X3": "X:"
@@ -32,73 +30,52 @@ EXTERNAL_DATA_DIR = DATA_DIR / "external"
 
 SCENE_NAME_SEP = "."
 lib_lua_path = LUA_DIR / "lib.lua"
-enter_interactive_path = SCRIPTS_DIR / "Enter-Interactive.ps1"
-categories_path = SCRIPTS_DIR / "Categories.psd1"
 
 
-def _read_packaged_lib_lua() -> str:
+def _iter_lua_assets(root, relative_dir: Path = Path()):
+    for child in root.iterdir():
+        relative_path = relative_dir / child.name
+        if child.is_dir():
+            yield from _iter_lua_assets(child, relative_path)
+        elif child.is_file() and child.name.endswith(".lua"):
+            yield child, relative_path
+
+
+def _packaged_lua_root():
     candidates = []
 
     try:
-        candidates.append(resources.files("drlua").joinpath("lua", "lib.lua"))
+        candidates.append(resources.files("drlua").joinpath("lua"))
     except Exception:
         logger.exception("Failed to resolve drlua package resources")
 
-    candidates.append(Path(__file__).resolve().parent / "lua" / "lib.lua")
+    candidates.append(Path(__file__).resolve().parent / "lua")
 
     for candidate in candidates:
-        try:
-            return candidate.read_text(encoding="utf-8")
-        except FileNotFoundError:
-            continue
+        if candidate.is_dir():
+            return candidate
 
     raise FileNotFoundError(
-        "Could not locate bundled resource 'drlua/lua/lib.lua'. "
+        "Could not locate bundled resource 'drlua/lua'. "
         "If this is a PyInstaller build, include drlua package data."
     )
 
 
-def sync_packaged_lib_lua(target_path: Path = lib_lua_path) -> str:
-    packaged_lib_lua_text = _read_packaged_lib_lua()
-    if not target_path.exists() or target_path.read_text(encoding="utf-8") != packaged_lib_lua_text:
+def sync_packaged_lua_assets(target_dir: Path = LUA_DIR) -> list[Path]:
+    packaged_lua_root = _packaged_lua_root()
+    synced_paths: list[Path] = []
+    target_dir.mkdir(exist_ok=True, parents=True)
+
+    for lua_asset, relative_path in _iter_lua_assets(packaged_lua_root):
+        target_path = target_dir / relative_path
         target_path.parent.mkdir(exist_ok=True, parents=True)
-        target_path.write_text(packaged_lib_lua_text, encoding="utf-8", newline="\n")
-    return packaged_lib_lua_text
+        target_path.write_text(lua_asset.read_text(encoding="utf-8"), encoding="utf-8", newline="\n")
+        synced_paths.append(target_path)
+
+    return synced_paths
 
 
-def _read_packaged_script(filename: str) -> str:
-    candidates = []
-
-    try:
-        candidates.append(resources.files("drlua").joinpath("scripts", filename))
-    except Exception:
-        logger.exception("Failed to resolve drlua script resources")
-
-    candidates.append(Path(__file__).resolve().parent.parent / "scripts" / filename)
-
-    for candidate in candidates:
-        try:
-            return candidate.read_text(encoding="utf-8")
-        except FileNotFoundError:
-            continue
-
-    raise FileNotFoundError(
-        f"Could not locate bundled resource 'drlua/scripts/{filename}'. "
-        "If this is a PyInstaller build, include drlua script data."
-    )
-
-
-def sync_packaged_script(filename: str, target_path: Path) -> str:
-    packaged_script_text = _read_packaged_script(filename)
-    if not target_path.exists() or target_path.read_text(encoding="utf-8") != packaged_script_text:
-        target_path.parent.mkdir(exist_ok=True, parents=True)
-        target_path.write_text(packaged_script_text, encoding="utf-8", newline="\n")
-    return packaged_script_text
-
-
-sync_packaged_lib_lua()
-sync_packaged_script("Enter-Interactive.ps1", enter_interactive_path)
-sync_packaged_script("Categories.psd1", categories_path)
+sync_packaged_lua_assets()
 
 # If tqdm is installed, configure loguru with tqdm.write
 # https://github.com/Delgan/loguru/issues/135

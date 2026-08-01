@@ -7,7 +7,7 @@ import sys
 from drlua.create_bins import create_bins
 from drlua.files import files_command
 from drlua.install import install, uninstall
-from drlua.interactive import launch_interactive
+from drlua.ui.interactive import launch_interactive
 from drlua import __version__
 
 
@@ -76,6 +76,13 @@ def _build_parser() -> argparse.ArgumentParser:
     install_group.add_argument("--install", action="store_true", help="install Windows Explorer context menu entries")
     install_group.add_argument("--uninstall", action="store_true", help="remove Windows Explorer context menu entries")
     parser.add_argument(
+        "--interactive",
+        "-i",
+        "-Interactive",
+        action="store_true",
+        help="open the interactive WinForms launcher",
+    )
+    parser.add_argument(
         "--files",
         "-Files",
         nargs="?",
@@ -119,6 +126,9 @@ def main(argv: list[str] | None = None) -> int:
         return install()
     if args.uninstall:
         return uninstall()
+    if args.interactive:
+        result = launch_interactive(args.from_location)
+        return int(result or 0)
     if args.files is not False:
         result = _run_files(args)
     else:

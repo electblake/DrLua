@@ -4,14 +4,16 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "DrLua"
-version = "0.1.1"
+version = "0.2.0"
 description = "DrLua writes lua scripts for Davinci Resolve to automate media imports and timeline creation"
 requires-python = ">=3.12"
 dependencies = [
+    "gooey>=1.0.8.1",
     "iterfzf>=1.9.0.67.0",
     "loguru>=0.7.3",
     "luadata>=1.0.5",
     "platformdirs>=4.10.0",
+    "pythonnet>=3.1.0",
     "ruff>=0.15.16",
     "tqdm>=4.68.1",
 ]

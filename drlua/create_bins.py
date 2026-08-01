@@ -405,6 +405,7 @@ def create_bins(
     full_only: bool = False,
     bins_only: bool = False,
     version: bool = False,
+    prompt_for_missing_tags: bool = True,
 ) -> int | None:
     if version:
         from drlua import __version__
@@ -433,7 +434,7 @@ def create_bins(
             name = input(f"Enter name [{default_name}]: ").strip() or default_name
     if not section:
         section = prompt_for_section(section_tags)
-    if not tag:
+    if not tag and prompt_for_missing_tags:
         tag = prompt_for_tags()
 
     logger.debug(f"Collecting from {input_location}")
@@ -456,8 +457,8 @@ def create_bins(
 
     clips = probe_media_files_to_clips(media_files)
 
-    if len(clips) < 3:
-        raise RuntimeError(f"Need at least 3 readable video clips; found {len(clips)}.")
+    if len(clips) == 0:
+        raise RuntimeError(f"No readable video clips found in {input_location}.")
 
     logger.info(f"Converted to {len(clips)} clips..")
 

@@ -12,3 +12,4 @@ temp_files/
 .pytest_cache
 .ruff_cache
 .vscode
+drlua/section_category_data.py
