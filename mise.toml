@@ -19,5 +19,5 @@ $version = uv run python -c "import tomllib; print(tomllib.load(open('pyproject.
 $arch = [System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture.ToString().ToLowerInvariant()
 $asset = "dist/drlua-v$version-windows-$arch.exe"
 Copy-Item -LiteralPath "dist/drlua.exe" -Destination $asset
-gh release create "v$version" $asset --repo electblake/DrLua --title "DrLua v$version" --generate-notes
+gh release create "v$version" $asset --repo electblake/DrLua --title "DrLua v$version" --notes-file README.md
 '''
