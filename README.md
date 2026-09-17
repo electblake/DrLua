@@ -1,4 +1,4 @@
-# drlua v0.2.2
+# drlua v0.2.3
 
 Creates DaVinci Resolve Lua scripts and helps manage generated .lua files.
 
@@ -13,7 +13,7 @@ usage: drlua [-h] [--install | --uninstall] [--interactive] [--files [NAME]]
              [--version]
              [from_locations ...]
 
-drlua v0.2.2
+drlua v0.2.3
 
 positional arguments:
   from_locations        media folders or files
@@ -37,13 +37,13 @@ options:
   --bins, --no-bins, -Bins
   --version, --Version
 
-drlua v0.2.2
+drlua v0.2.3
 Creates DaVinci Resolve Lua scripts and helps manage generated .lua files.
 ```
 
 ## `--version`
 
 ```text
-0.2.2
-DrLua Version: 0.2.2
+0.2.3
+DrLua Version: 0.2.3
 ```
