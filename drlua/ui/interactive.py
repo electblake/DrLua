@@ -20,8 +20,12 @@ def _split_tags(text: str) -> list[str]:
     return [tag.strip() for tag in re.split(r"[\r\n,]", text) if tag.strip()]
 
 
+def _split_source_paths(text: str) -> list[str]:
+    return [path.strip() for path in re.split(r"[|\r\n]+", text) if path.strip()]
+
+
 def _run_create_bins_from_form(
-    source_path: str,
+    source_paths: list[str],
     name: str,
     section: str,
     group: str,
@@ -33,7 +37,7 @@ def _run_create_bins_from_form(
     with redirect_stdout(output), redirect_stderr(output):
         try:
             create_result = create_bins(
-                Path(source_path),
+                [Path(source_path) for source_path in source_paths],
                 name=name or None,
                 section=section or None,
                 group_name=group or None,
@@ -48,7 +52,7 @@ def _run_create_bins_from_form(
     return result, output.getvalue().rstrip()
 
 
-def launch_interactive(input_path: str | Path | None = None) -> int:
+def launch_interactive(input_paths: list[Path] | None = None) -> int:
     try:
         import clr
 
@@ -64,7 +68,7 @@ def launch_interactive(input_path: str | Path | None = None) -> int:
 
     def run() -> None:
         try:
-            result["exit_code"] = _show_launcher(input_path)
+            result["exit_code"] = _show_launcher(input_paths)
         except Exception:
             traceback.print_exc()
             result["exit_code"] = 1
@@ -76,7 +80,7 @@ def launch_interactive(input_path: str | Path | None = None) -> int:
     return int(result["exit_code"])
 
 
-def _show_launcher(input_path: str | Path | None = None) -> int:
+def _show_launcher(input_paths: list[Path] | None = None) -> int:
     from System import Action  # type: ignore[import-not-found]
     from System.Drawing import Font, Point, Size  # type: ignore[import-not-found]
     from System.Windows.Forms import (  # type: ignore[import-not-found]
@@ -98,13 +102,13 @@ def _show_launcher(input_path: str | Path | None = None) -> int:
     Application.EnableVisualStyles()
     Application.SetCompatibleTextRenderingDefault(False)
 
-    resolved_input_path = _resolve_initial_input_path(input_path, OpenFileDialog, DialogResult)
-    if resolved_input_path is None:
+    resolved_input_paths = _resolve_initial_input_paths(input_paths, OpenFileDialog, DialogResult)
+    if resolved_input_paths is None:
         return 0
 
-    default_name = _default_release_name(resolved_input_path)
+    default_name = _default_release_name(resolved_input_paths[0])
     section_options = _section_options()
-    matched_section, matched_category = _match_section_category(resolved_input_path)
+    matched_section, matched_category = _match_section_category(resolved_input_paths[0])
 
     form = Form()
     form.Text = "DrLua Launcher"
@@ -115,13 +119,13 @@ def _show_launcher(input_path: str | Path | None = None) -> int:
     source_label = Label()
     source_label.Location = Point(12, 14)
     source_label.Size = Size(100, 20)
-    source_label.Text = "Source Path"
+    source_label.Text = "Source Paths"
     form.Controls.Add(source_label)
 
     source_text_box = TextBox()
     source_text_box.Location = Point(12, 36)
     source_text_box.Size = Size(680, 24)
-    source_text_box.Text = resolved_input_path
+    source_text_box.Text = " | ".join(resolved_input_paths)
     form.Controls.Add(source_text_box)
 
     browse_button = Button()
@@ -224,14 +228,14 @@ def _show_launcher(input_path: str | Path | None = None) -> int:
     form.Controls.Add(output_text_box)
 
     def browse_clicked(_sender: object, _event: object) -> None:
-        selected_path = _select_input_path(OpenFileDialog, DialogResult, source_text_box.Text)
-        if selected_path is None:
+        selected_paths = _select_input_paths(OpenFileDialog, DialogResult, source_text_box.Text)
+        if selected_paths is None:
             return
 
-        source_text_box.Text = selected_path
+        source_text_box.Text = " | ".join([*_split_source_paths(source_text_box.Text), *selected_paths])
         if not name_text_box.Text.strip():
-            name_text_box.Text = _default_release_name(selected_path)
-        apply_path_match(selected_path)
+            name_text_box.Text = _default_release_name(selected_paths[0])
+        apply_path_match(selected_paths[0])
 
     def set_category_options(section: str, selected_category: str | None = None) -> None:
         category_combo_box.Items.Clear()
@@ -276,18 +280,18 @@ def _show_launcher(input_path: str | Path | None = None) -> int:
 
         run_on_ui(update)
 
-    def run_create_bins(source_path: str, name: str, section: str, group: str, tags: list[str]) -> None:
-        result, output = _run_create_bins_from_form(source_path, name, section, group, tags)
+    def run_create_bins(source_paths: list[str], name: str, section: str, group: str, tags: list[str]) -> None:
+        result, output = _run_create_bins_from_form(source_paths, name, section, group, tags)
         finish_run(result, output)
 
     def send_clicked(_sender: object, _event: object) -> None:
-        source_path = source_text_box.Text.strip()
+        source_paths = _split_source_paths(source_text_box.Text)
         name = name_text_box.Text.strip()
         section = section_combo_box.Text.strip()
         group = group_text_box.Text.strip()
         tags = _split_tags(tag_text_box.Text)
         arguments = _preview_arguments(
-            source_path,
+            source_paths,
             name,
             section,
             group,
@@ -301,7 +305,7 @@ def _show_launcher(input_path: str | Path | None = None) -> int:
         status_label.Text = "Running"
         PythonThread(
             target=run_create_bins,
-            args=(source_path, name, section, group, tags),
+            args=(source_paths, name, section, group, tags),
             daemon=True,
         ).start()
 
@@ -320,24 +324,25 @@ def _show_launcher(input_path: str | Path | None = None) -> int:
     return 0
 
 
-def _resolve_initial_input_path(input_path: str | Path | None, folder_browser_dialog, dialog_result) -> str | None:
-    if input_path is not None:
-        return str(Path(input_path).expanduser().resolve())
+def _resolve_initial_input_paths(input_paths: list[Path] | None, folder_browser_dialog, dialog_result) -> list[str] | None:
+    if input_paths:
+        return [str(input_path.expanduser().resolve()) for input_path in input_paths]
 
-    return _select_input_path(folder_browser_dialog, dialog_result)
+    return _select_input_paths(folder_browser_dialog, dialog_result)
 
 
-def _select_input_path(open_file_dialog, dialog_result, initial_path: str | None = None) -> str | None:
+def _select_input_paths(open_file_dialog, dialog_result, initial_paths: str | None = None) -> list[str] | None:
     dialog = open_file_dialog()
-    dialog.Title = "Select source folder or file"
+    dialog.Title = "Select source folder or files"
     dialog.Filter = "Media, export, or any file (*.*)|*.*"
+    dialog.Multiselect = True
     dialog.CheckFileExists = False
     dialog.CheckPathExists = True
     dialog.ValidateNames = False
     dialog.FileName = "Select this folder"
 
-    if initial_path:
-        initial = Path(initial_path).expanduser()
+    if initial_paths:
+        initial = Path(_split_source_paths(initial_paths)[0]).expanduser()
         if initial.is_file():
             dialog.InitialDirectory = str(initial.parent.resolve())
             dialog.FileName = initial.name
@@ -347,12 +352,11 @@ def _select_input_path(open_file_dialog, dialog_result, initial_path: str | None
     if dialog.ShowDialog() != dialog_result.OK:
         return None
 
-    selected = Path(str(dialog.FileName)).expanduser()
-    if selected.exists():
-        return str(selected.resolve())
-    if selected.name == "Select this folder" and selected.parent.exists():
-        return str(selected.parent.resolve())
-    return str(selected.resolve())
+    selected_paths = [Path(str(file_name)).expanduser() for file_name in dialog.FileNames]
+    return [
+        str((selected.parent if selected.name == "Select this folder" else selected).resolve())
+        for selected in selected_paths
+    ]
 
 
 def _section_options() -> list[str]:
@@ -454,8 +458,8 @@ def _path_is_under(selected_text: str, root_path: str) -> bool:
     return selected_text == root_text or selected_text.startswith(f"{root_text}\\") or selected_text.startswith(f"{root_text}/")
 
 
-def _preview_arguments(source_path: str, name: str, section: str, group: str, tags: list[str]) -> list[str]:
-    arguments = [source_path.strip()]
+def _preview_arguments(source_paths: list[str], name: str, section: str, group: str, tags: list[str]) -> list[str]:
+    arguments = [source_path.strip() for source_path in source_paths]
     if name.strip():
         arguments.extend(["--name", name.strip()])
     if section.strip():

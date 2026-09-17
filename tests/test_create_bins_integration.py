@@ -16,7 +16,7 @@ def test_create_bins_with_sample_videos(tmp_path: Path, capsys: pytest.CaptureFi
     monkeypatch.setattr(create_bins_module, "PROCESSED_DATA_DIR", tmp_path / "processed")
 
     result = create_bins_module.create_bins(
-        sample_dir,
+        [sample_dir],
         name="Sample",
         section="Fansites",
         tag=["integration"],

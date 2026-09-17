@@ -11,12 +11,12 @@ usage: drlua [-h] [--install | --uninstall] [--interactive] [--files [NAME]]
              [--vertical | --no-vertical | -Vertical]
              [--full | --no-full | -Full] [--bins | --no-bins | -Bins]
              [--version]
-             [from_location]
+             [from_locations ...]
 
 drlua v0.2.2
 
 positional arguments:
-  from_location         media folder or export file
+  from_locations        media folders or files
 
 options:
   -h, --help            show this help message and exit

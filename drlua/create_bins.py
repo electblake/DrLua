@@ -208,7 +208,8 @@ def collect_stash_export_media_files(input_path: Path):
         return Path(*posix_path.parts[1:]).expanduser() if posix_path.is_absolute() else Path(*posix_path.parts).expanduser()
 
     media_files: list[Path] = []
-    for export_json in input_path.glob("**/*.json"):
+    export_jsons = [input_path] if input_path.is_file() else input_path.glob("**/*.json")
+    for export_json in export_jsons:
         with export_json.open("r", encoding="utf-8") as fp:
             data = json.load(fp)
 
@@ -395,7 +396,7 @@ section_tags = ["Fansites", "Civilians", "Inspired"]
 
 
 def create_bins(
-    from_location: Path,
+    from_locations: list[Path],
     name: str | None = None,
     section: str | None = None,
     tag: list[str] | None = None,
@@ -414,19 +415,11 @@ def create_bins(
         return 0
 
     tag = list(tag or [])
-    input_location = Path(from_location).expanduser().resolve()
+    input_locations = [Path(from_location).expanduser().resolve() for from_location in from_locations]
+    input_location = input_locations[0]
     name = name.strip() if name else None
     section = section.strip() if section else None
     tag = [item.strip() for item in tag if item and item.strip()]
-
-    media_files = []
-    if input_location.is_file() and input_location.suffix in SUPPORTED_EXTENSIONS:
-        print(f"Cannot use {input_location.suffix} file ({input_location.as_posix()})")
-        use_parent = _ask_yes_no("Use file parent as input instead?")
-        if use_parent:
-            input_location = input_location.parent
-        else:
-            raise RuntimeError(f"No supported media files location provided. {input_location}")
 
     if not name:
         default_name = default_release_name_from_input(input_location)
@@ -437,28 +430,35 @@ def create_bins(
     if not tag and prompt_for_missing_tags:
         tag = prompt_for_tags()
 
-    logger.debug(f"Collecting from {input_location}")
+    logger.debug(f"Collecting from {input_locations}")
 
-    if input_location.is_dir():
-        media_files = collect_folder_media_files(input_location, recursive)
-        if len(media_files) == 0 and len(list(input_location.glob("**/*.json"))) > 0:
-            media_files = collect_stash_export_media_files(input_location)
-    elif input_location.is_file() and input_location.suffix == ".efu":
-        media_files = collect_efu_media_files(input_location)
-    elif input_location.is_file() and input_location.suffix == ".csv":
-        media_files = collect_metadata_csv_media_files(input_location)
-    else:
-        raise RuntimeError("Could not process input location")
+    media_files = []
+    for input_location_item in input_locations:
+        if input_location_item.is_dir():
+            collected_files = collect_folder_media_files(input_location_item, recursive)
+            if len(collected_files) == 0 and len(list(input_location_item.glob("**/*.json"))) > 0:
+                collected_files = collect_stash_export_media_files(input_location_item)
+            media_files.extend(collected_files)
+        elif input_location_item.suffix.lower() in SUPPORTED_EXTENSIONS:
+            media_files.append(input_location_item)
+        elif input_location_item.suffix.lower() == ".efu":
+            media_files.extend(collect_efu_media_files(input_location_item))
+        elif input_location_item.suffix.lower() == ".csv":
+            media_files.extend(collect_metadata_csv_media_files(input_location_item))
+        elif input_location_item.suffix.lower() == ".json":
+            media_files.extend(collect_stash_export_media_files(input_location_item))
+        else:
+            raise RuntimeError("Could not process input location")
 
     if len(media_files) == 0:
-        raise RuntimeError(f"No supported media files found in {input_location}")
+        raise RuntimeError(f"No supported media files found in {input_locations}")
 
     logger.debug(f"Collected {len(media_files)} media files..")
 
     clips = probe_media_files_to_clips(media_files)
 
     if len(clips) == 0:
-        raise RuntimeError(f"No readable video clips found in {input_location}.")
+        raise RuntimeError(f"No readable video clips found in {input_locations}.")
 
     logger.info(f"Converted to {len(clips)} clips..")
 
@@ -478,7 +478,7 @@ def create_bins(
     if not payload:
         raise RuntimeError("payload empty")
 
-    header = lua_header(release_name, input_location, out_file_path)
+    header = lua_header(release_name, input_locations, out_file_path)
     out_file_path.parent.mkdir(parents=True, exist_ok=True)
 
     drlua_lib = (LUA_DIR / "lib.lua").read_text(encoding="utf-8")

@@ -19,7 +19,7 @@ Creates DaVinci Resolve Lua scripts and helps manage generated .lua files."""
 
 
 def _add_create_bins_arguments(parser: argparse.ArgumentParser) -> None:
-    parser.add_argument("from_location", nargs="?", type=Path, help="media folder or export file")
+    parser.add_argument("from_locations", nargs="*", type=Path, help="media folders or files")
     parser.add_argument("--name", "-Name")
     parser.add_argument("--section", "-Section")
     parser.add_argument("--tag", "-Tag", action="append", default=[])
@@ -97,11 +97,11 @@ def _build_parser() -> argparse.ArgumentParser:
 
 
 def _run_create_bins(args: argparse.Namespace) -> CommandResult:
-    if args.from_location is None:
+    if not args.from_locations:
         return launch_interactive()
 
     return create_bins(
-        from_location=args.from_location,
+        from_locations=args.from_locations,
         name=args.name,
         section=args.section,
         tag=args.tag,
@@ -127,7 +127,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.uninstall:
         return uninstall()
     if args.interactive:
-        result = launch_interactive(args.from_location)
+        result = launch_interactive(args.from_locations or None)
         return int(result or 0)
     if args.files is not False:
         result = _run_files(args)
