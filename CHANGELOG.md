@@ -7,6 +7,16 @@ and this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ## [Unreleased]
 
+### Added
+
+- Add a resizable Tkinter launcher inspired by Spectra and YOLO Media Organizer, with separate folder/file pickers, output copying, and an output-folder shortcut.
+- Add a Windows installer build with a windowed launcher, console CLI, bundled FFprobe, and per-user shortcuts.
+
+### Changed
+
+- Replace the WinForms launcher with Tkinter while preserving section/category matching, tag suggestions, and background script generation.
+- Remove the unused Gooey and Python.NET runtime dependencies.
+
 ## [0.2.3] - 2026-09-17
 
 ### Added

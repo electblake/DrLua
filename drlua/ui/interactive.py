@@ -2,11 +2,17 @@ from __future__ import annotations
 
 from contextlib import redirect_stderr, redirect_stdout
 import io
+import os
 from pathlib import Path
+from queue import SimpleQueue
 import re
-from threading import Thread as PythonThread
+from threading import Thread
+import tkinter as tk
+from tkinter import filedialog, font, ttk
 import traceback
 
+from drlua import __version__
+from drlua.config import PROCESSED_DATA_DIR
 from drlua.create_bins import create_bins
 from drlua.section_category_data import SECTION_CATEGORY_DATA
 
@@ -52,311 +58,212 @@ def _run_create_bins_from_form(
     return result, output.getvalue().rstrip()
 
 
+class LauncherView(ttk.Frame):
+    def __init__(self, parent: tk.Misc, input_paths: list[Path] | None = None):
+        super().__init__(parent, padding=16)
+        self.columnconfigure(0, weight=1)
+        self.rowconfigure(1, weight=1)
+        self.events = SimpleQueue()
+        self.busy = False
+        self.poll_id = None
+        self.name = tk.StringVar(self)
+        self.section = tk.StringVar(self)
+        self.category = tk.StringVar(self)
+        self.group = tk.StringVar(self)
+        self.status = tk.StringVar(self, value="Choose source folders or files to get started.")
+
+        heading = ttk.Frame(self)
+        heading.grid(row=0, column=0, sticky="ew", pady=(0, 14))
+        self.title_font = font.Font(self, family="Segoe UI", size=20, weight="bold")
+        ttk.Label(heading, text="DrLua", font=self.title_font).pack(side="left")
+        ttk.Label(heading, text=f"v{__version__}  ·  DaVinci Resolve Lua scripts").pack(side="left", padx=14)
+
+        panes = ttk.Panedwindow(self, orient=tk.VERTICAL)
+        panes.grid(row=1, column=0, sticky="nsew")
+        form = ttk.Frame(panes, padding=(0, 0, 0, 12))
+        form.columnconfigure(0, weight=1)
+        form.rowconfigure(3, weight=1)
+        panes.add(form, weight=3)
+
+        sources = ttk.LabelFrame(form, text="Source paths", padding=10)
+        sources.grid(row=0, column=0, sticky="ew", pady=(0, 12))
+        sources.columnconfigure(0, weight=1)
+        self.sources = tk.Text(sources, height=3, width=40, wrap="none", undo=True)
+        self.sources.grid(row=0, column=0, sticky="nsew")
+        source_scroll = ttk.Scrollbar(sources, command=self.sources.yview)
+        source_scroll.grid(row=0, column=1, sticky="ns")
+        self.sources.configure(yscrollcommand=source_scroll.set)
+        browse = ttk.Frame(sources)
+        browse.grid(row=0, column=2, sticky="n", padx=(10, 0))
+        ttk.Button(browse, text="Add folder…", command=self.add_folder).pack(fill="x")
+        ttk.Button(browse, text="Add files…", command=self.add_files).pack(fill="x", pady=(6, 0))
+        ttk.Label(sources, text="One path per line, or separate paths with |.").grid(row=1, column=0, sticky="w", pady=(6, 0))
+        self.sources.bind("<FocusOut>", self.sources_changed)
+        self.sources.bind("<<Modified>>", self.source_edited)
+
+        fields = ttk.Frame(form)
+        fields.grid(row=1, column=0, sticky="ew")
+        for column in range(3):
+            fields.columnconfigure(column, weight=1, uniform="fields")
+        for column, label in enumerate(("Name", "Section", "Category")):
+            ttk.Label(fields, text=label).grid(row=0, column=column, sticky="w", padx=(0, 10))
+        self.name_entry = ttk.Entry(fields, textvariable=self.name)
+        self.name_entry.grid(row=1, column=0, sticky="ew", padx=(0, 10), pady=(4, 10))
+        self.sections = ttk.Combobox(fields, textvariable=self.section, values=_section_options())
+        self.sections.grid(row=1, column=1, sticky="ew", padx=(0, 10), pady=(4, 10))
+        self.categories = ttk.Combobox(fields, textvariable=self.category)
+        self.categories.grid(row=1, column=2, sticky="ew", pady=(4, 10))
+        ttk.Label(fields, text="Group").grid(row=2, column=0, sticky="w")
+        ttk.Entry(fields, textvariable=self.group).grid(row=3, column=0, columnspan=3, sticky="ew", pady=(4, 10))
+        ttk.Label(form, text="Tags (one per line or comma-separated)").grid(row=2, column=0, sticky="w")
+        tag_frame = ttk.Frame(form)
+        tag_frame.grid(row=3, column=0, sticky="nsew", pady=(4, 10))
+        tag_frame.columnconfigure(0, weight=1)
+        tag_frame.rowconfigure(0, weight=1)
+        self.tags = tk.Text(tag_frame, height=4, width=40, wrap="word", undo=True)
+        self.tags.grid(row=0, column=0, sticky="nsew")
+        tag_scroll = ttk.Scrollbar(tag_frame, command=self.tags.yview)
+        tag_scroll.grid(row=0, column=1, sticky="ns")
+        self.tags.configure(yscrollcommand=tag_scroll.set)
+
+        actions = ttk.Frame(form)
+        actions.grid(row=4, column=0, sticky="ew")
+        actions.columnconfigure(1, weight=1)
+        self.send = ttk.Button(actions, text="Send to DrLua", command=self.submit, state="disabled")
+        self.send.grid(row=0, column=0, sticky="w")
+        self.progress = ttk.Progressbar(actions, mode="indeterminate")
+        self.progress.grid(row=0, column=1, sticky="ew", padx=12)
+        self.progress.grid_remove()
+        ttk.Button(actions, text="Open output folder", command=self.open_output).grid(row=0, column=2)
+
+        output_frame = ttk.LabelFrame(panes, text="Output", padding=10)
+        output_frame.columnconfigure(0, weight=1)
+        output_frame.rowconfigure(0, weight=1)
+        panes.add(output_frame, weight=2)
+        self.output = tk.Text(output_frame, height=8, width=40, wrap="word", state="disabled", font="TkFixedFont")
+        self.output.grid(row=0, column=0, sticky="nsew")
+        output_scroll = ttk.Scrollbar(output_frame, command=self.output.yview)
+        output_scroll.grid(row=0, column=1, sticky="ns")
+        self.output.configure(yscrollcommand=output_scroll.set)
+        ttk.Button(output_frame, text="Copy output", command=self.copy_output).grid(row=1, column=0, sticky="e", pady=(8, 0))
+        ttk.Label(self, textvariable=self.status).grid(row=2, column=0, sticky="w", pady=(10, 0))
+
+        self.section.trace_add("write", self.section_changed)
+        self.category.trace_add("write", self.category_changed)
+        section_options = _section_options()
+        self.section.set(section_options[0] if section_options else "")
+        if input_paths:
+            self.append_sources([str(path.expanduser().resolve()) for path in input_paths])
+        self.sources.focus_set()
+
+    def source_edited(self, _event=None):
+        self.sources.edit_modified(False)
+        self.send.state(["!disabled"] if self.source_paths() and not self.busy else ["disabled"])
+
+    def source_paths(self):
+        return _split_source_paths(self.sources.get("1.0", "end-1c"))
+
+    def sources_changed(self, _event=None):
+        paths = self.source_paths()
+        if paths:
+            if not self.name.get().strip():
+                self.name.set(_default_release_name(paths[0]))
+            section, category = _match_section_category(paths[0])
+            if section:
+                self.section.set(section)
+                self.category.set(category or "")
+
+    def append_sources(self, paths):
+        current = self.sources.get("1.0", "end-1c").strip()
+        self.sources.delete("1.0", "end")
+        self.sources.insert("1.0", "\n".join(([current] if current else []) + paths))
+        self.sources_changed()
+        self.source_edited()
+        self.status.set("Ready to generate a Lua script.")
+
+    def add_folder(self):
+        selected = filedialog.askdirectory(parent=self, title="Add source folder")
+        if selected:
+            self.append_sources([selected])
+
+    def add_files(self):
+        selected = filedialog.askopenfilenames(parent=self, title="Add media or export files")
+        if selected:
+            self.append_sources(list(selected))
+
+    def section_changed(self, *_):
+        self.categories.configure(values=_category_options(self.section.get().strip()))
+        self.category.set("")
+
+    def category_changed(self, *_):
+        tags = _category_tags(self.section.get().strip(), self.category.get().strip())
+        self.tags.delete("1.0", "end")
+        self.tags.insert("1.0", "\n".join(tags))
+
+    def append_output(self, text):
+        text = re.sub(r"\x1b\[[0-9;]*m", "", text)
+        self.output.configure(state="normal")
+        self.output.insert("end", text)
+        self.output.see("end")
+        self.output.configure(state="disabled")
+
+    def submit(self):
+        if self.busy or not self.source_paths():
+            return
+        args = (self.source_paths(), self.name.get().strip(), self.section.get().strip(),
+                self.group.get().strip(), _split_tags(self.tags.get("1.0", "end-1c")))
+        self.busy = True
+        self.send.state(["disabled"])
+        self.status.set("Generating Lua script…")
+        self.progress.grid()
+        self.progress.start(12)
+        self.append_output("Running: drlua " + " ".join(_preview_arguments(*args)) + "\n\n")
+        Thread(target=self.run_generation, args=args, daemon=True).start()
+        self.poll_id = self.after(100, self.poll_result)
+
+    def run_generation(self, *args):
+        self.events.put(_run_create_bins_from_form(*args))
+
+    def poll_result(self):
+        self.poll_id = None
+        if self.events.empty():
+            self.poll_id = self.after(100, self.poll_result)
+            return
+        result, output = self.events.get()
+        self.append_output(output + f"\nExit code: {result}\n\n")
+        self.busy = False
+        self.progress.stop()
+        self.progress.grid_remove()
+        self.source_edited()
+        self.status.set("Lua script created. Paste the dofile command into Resolve." if result == 0 else "Generation failed. See output for the traceback.")
+
+    def open_output(self):
+        folder = PROCESSED_DATA_DIR / "create_bins"
+        folder.mkdir(parents=True, exist_ok=True)
+        os.startfile(folder)
+
+    def copy_output(self):
+        self.clipboard_clear()
+        self.clipboard_append(self.output.get("1.0", "end-1c"))
+
+    def destroy(self):
+        if self.poll_id is not None:
+            self.after_cancel(self.poll_id)
+        self.progress.stop()
+        super().destroy()
+
+
 def launch_interactive(input_paths: list[Path] | None = None) -> int:
-    try:
-        import clr
-
-        clr.AddReference("System.Drawing")  # type: ignore[attr-defined]
-        clr.AddReference("System.Windows.Forms")  # type: ignore[attr-defined]
-
-        from System.Threading import ApartmentState, Thread, ThreadStart  # type: ignore[import-not-found]
-    except Exception:
-        traceback.print_exc()
-        return 1
-
-    result = {"exit_code": 1}
-
-    def run() -> None:
-        try:
-            result["exit_code"] = _show_launcher(input_paths)
-        except Exception:
-            traceback.print_exc()
-            result["exit_code"] = 1
-
-    thread = Thread(ThreadStart(run))
-    thread.SetApartmentState(ApartmentState.STA)
-    thread.Start()
-    thread.Join()
-    return int(result["exit_code"])
-
-
-def _show_launcher(input_paths: list[Path] | None = None) -> int:
-    from System import Action  # type: ignore[import-not-found]
-    from System.Drawing import Font, Point, Size  # type: ignore[import-not-found]
-    from System.Windows.Forms import (  # type: ignore[import-not-found]
-        Application,
-        Button,
-        ComboBox,
-        ComboBoxStyle,
-        DialogResult,
-        Form,
-        FormStartPosition,
-        Label,
-        OpenFileDialog,
-        ProgressBar,
-        ProgressBarStyle,
-        ScrollBars,
-        TextBox,
-    )
-
-    Application.EnableVisualStyles()
-    Application.SetCompatibleTextRenderingDefault(False)
-
-    resolved_input_paths = _resolve_initial_input_paths(input_paths, OpenFileDialog, DialogResult)
-    if resolved_input_paths is None:
-        return 0
-
-    default_name = _default_release_name(resolved_input_paths[0])
-    section_options = _section_options()
-    matched_section, matched_category = _match_section_category(resolved_input_paths[0])
-
-    form = Form()
-    form.Text = "DrLua Launcher"
-    form.StartPosition = FormStartPosition.CenterScreen
-    form.Size = Size(804, 620)
-    form.MinimumSize = Size(804, 620)
-
-    source_label = Label()
-    source_label.Location = Point(12, 14)
-    source_label.Size = Size(100, 20)
-    source_label.Text = "Source Paths"
-    form.Controls.Add(source_label)
-
-    source_text_box = TextBox()
-    source_text_box.Location = Point(12, 36)
-    source_text_box.Size = Size(680, 24)
-    source_text_box.Text = " | ".join(resolved_input_paths)
-    form.Controls.Add(source_text_box)
-
-    browse_button = Button()
-    browse_button.Location = Point(700, 34)
-    browse_button.Size = Size(72, 28)
-    browse_button.Text = "Browse"
-    form.Controls.Add(browse_button)
-
-    name_label = Label()
-    name_label.Location = Point(12, 76)
-    name_label.Size = Size(100, 20)
-    name_label.Text = "Name"
-    form.Controls.Add(name_label)
-
-    name_text_box = TextBox()
-    name_text_box.Location = Point(12, 98)
-    name_text_box.Size = Size(250, 24)
-    name_text_box.Text = default_name
-    form.Controls.Add(name_text_box)
-
-    section_label = Label()
-    section_label.Location = Point(282, 76)
-    section_label.Size = Size(100, 20)
-    section_label.Text = "Section"
-    form.Controls.Add(section_label)
-
-    section_combo_box = ComboBox()
-    section_combo_box.Location = Point(282, 98)
-    section_combo_box.Size = Size(230, 24)
-    section_combo_box.DropDownStyle = ComboBoxStyle.DropDown
-    for option in section_options:
-        section_combo_box.Items.Add(option)
-    section_combo_box.Text = matched_section or (section_options[0] if section_options else "")
-    form.Controls.Add(section_combo_box)
-
-    category_label = Label()
-    category_label.Location = Point(532, 76)
-    category_label.Size = Size(100, 20)
-    category_label.Text = "Category"
-    form.Controls.Add(category_label)
-
-    category_combo_box = ComboBox()
-    category_combo_box.Location = Point(532, 98)
-    category_combo_box.Size = Size(240, 24)
-    category_combo_box.DropDownStyle = ComboBoxStyle.DropDown
-    form.Controls.Add(category_combo_box)
-
-    group_label = Label()
-    group_label.Location = Point(12, 138)
-    group_label.Size = Size(100, 20)
-    group_label.Text = "Group"
-    form.Controls.Add(group_label)
-
-    group_text_box = TextBox()
-    group_text_box.Location = Point(12, 160)
-    group_text_box.Size = Size(760, 24)
-    form.Controls.Add(group_text_box)
-
-    tag_label = Label()
-    tag_label.Location = Point(12, 200)
-    tag_label.Size = Size(240, 20)
-    tag_label.Text = "Tags (one per line or comma-separated)"
-    form.Controls.Add(tag_label)
-
-    tag_text_box = TextBox()
-    tag_text_box.Location = Point(12, 222)
-    tag_text_box.Size = Size(760, 140)
-    tag_text_box.Multiline = True
-    tag_text_box.AcceptsReturn = True
-    tag_text_box.AcceptsTab = False
-    tag_text_box.ScrollBars = ScrollBars.Vertical
-    form.Controls.Add(tag_text_box)
-
-    send_button = Button()
-    send_button.Location = Point(12, 376)
-    send_button.Size = Size(150, 34)
-    send_button.Text = "Send to DrLua"
-    form.Controls.Add(send_button)
-
-    progress_bar = ProgressBar()
-    progress_bar.Location = Point(174, 383)
-    progress_bar.Size = Size(598, 20)
-    progress_bar.Style = ProgressBarStyle.Marquee
-    progress_bar.Visible = False
-    form.Controls.Add(progress_bar)
-
-    status_label = Label()
-    status_label.Location = Point(12, 424)
-    status_label.Size = Size(100, 20)
-    status_label.Text = "Output"
-    form.Controls.Add(status_label)
-
-    output_text_box = TextBox()
-    output_text_box.Location = Point(12, 446)
-    output_text_box.Size = Size(760, 120)
-    output_text_box.Multiline = True
-    output_text_box.ReadOnly = True
-    output_text_box.ScrollBars = ScrollBars.Vertical
-    output_text_box.Font = Font("Consolas", 9)
-    form.Controls.Add(output_text_box)
-
-    def browse_clicked(_sender: object, _event: object) -> None:
-        selected_paths = _select_input_paths(OpenFileDialog, DialogResult, source_text_box.Text)
-        if selected_paths is None:
-            return
-
-        source_text_box.Text = " | ".join([*_split_source_paths(source_text_box.Text), *selected_paths])
-        if not name_text_box.Text.strip():
-            name_text_box.Text = _default_release_name(selected_paths[0])
-        apply_path_match(selected_paths[0])
-
-    def set_category_options(section: str, selected_category: str | None = None) -> None:
-        category_combo_box.Items.Clear()
-        categories = _category_options(section)
-        for category in categories:
-            category_combo_box.Items.Add(category)
-        category_combo_box.Enabled = True
-        category_combo_box.Text = selected_category or ""
-
-    def set_tags_for_category(section: str, category: str) -> None:
-        tags = _category_tags(section, category)
-        tag_text_box.Text = "\r\n".join(tags)
-
-    def apply_path_match(path_value: str) -> None:
-        section, category = _match_section_category(path_value)
-        if section:
-            section_combo_box.Text = section
-            set_category_options(section, category)
-        if section and category:
-            set_tags_for_category(section, category)
-
-    def section_changed(_sender: object, _event: object) -> None:
-        set_category_options(section_combo_box.Text.strip())
-
-    def category_changed(_sender: object, _event: object) -> None:
-        set_tags_for_category(section_combo_box.Text.strip(), category_combo_box.Text.strip())
-
-    def run_on_ui(action) -> None:
-        if form.IsDisposed or not form.IsHandleCreated:
-            return
-        form.BeginInvoke(Action(action))
-
-    def finish_run(result: int, output: str) -> None:
-        def update() -> None:
-            if output:
-                output_text_box.AppendText(output.replace("\n", "\r\n") + "\r\n")
-            output_text_box.AppendText(f"Exit code: {result}\r\n")
-            form.UseWaitCursor = False
-            progress_bar.Visible = False
-            send_button.Enabled = True
-            status_label.Text = "Output"
-
-        run_on_ui(update)
-
-    def run_create_bins(source_paths: list[str], name: str, section: str, group: str, tags: list[str]) -> None:
-        result, output = _run_create_bins_from_form(source_paths, name, section, group, tags)
-        finish_run(result, output)
-
-    def send_clicked(_sender: object, _event: object) -> None:
-        source_paths = _split_source_paths(source_text_box.Text)
-        name = name_text_box.Text.strip()
-        section = section_combo_box.Text.strip()
-        group = group_text_box.Text.strip()
-        tags = _split_tags(tag_text_box.Text)
-        arguments = _preview_arguments(
-            source_paths,
-            name,
-            section,
-            group,
-            tags,
-        )
-        output_text_box.Text = f"Running:\r\ndrlua {' '.join(arguments)}\r\n\r\n"
-
-        send_button.Enabled = False
-        form.UseWaitCursor = True
-        progress_bar.Visible = True
-        status_label.Text = "Running"
-        PythonThread(
-            target=run_create_bins,
-            args=(source_paths, name, section, group, tags),
-            daemon=True,
-        ).start()
-
-    browse_button.Click += browse_clicked
-    section_combo_box.SelectedIndexChanged += section_changed
-    section_combo_box.TextChanged += section_changed
-    category_combo_box.SelectedIndexChanged += category_changed
-    category_combo_box.TextChanged += category_changed
-    send_button.Click += send_clicked
-
-    set_category_options(section_combo_box.Text.strip(), matched_category)
-    if matched_section and matched_category:
-        set_tags_for_category(matched_section, matched_category)
-
-    form.ShowDialog()
+    root = tk.Tk()
+    root.title(f"DrLua Launcher v{__version__}")
+    root.geometry("920x780")
+    root.minsize(700, 660)
+    root.columnconfigure(0, weight=1)
+    root.rowconfigure(0, weight=1)
+    view = LauncherView(root, input_paths)
+    view.grid(row=0, column=0, sticky="nsew")
+    root.mainloop()
     return 0
-
-
-def _resolve_initial_input_paths(input_paths: list[Path] | None, folder_browser_dialog, dialog_result) -> list[str] | None:
-    if input_paths:
-        return [str(input_path.expanduser().resolve()) for input_path in input_paths]
-
-    return _select_input_paths(folder_browser_dialog, dialog_result)
-
-
-def _select_input_paths(open_file_dialog, dialog_result, initial_paths: str | None = None) -> list[str] | None:
-    dialog = open_file_dialog()
-    dialog.Title = "Select source folder or files"
-    dialog.Filter = "Media, export, or any file (*.*)|*.*"
-    dialog.Multiselect = True
-    dialog.CheckFileExists = False
-    dialog.CheckPathExists = True
-    dialog.ValidateNames = False
-    dialog.FileName = "Select this folder"
-
-    if initial_paths:
-        initial = Path(_split_source_paths(initial_paths)[0]).expanduser()
-        if initial.is_file():
-            dialog.InitialDirectory = str(initial.parent.resolve())
-            dialog.FileName = initial.name
-        elif initial.is_dir():
-            dialog.InitialDirectory = str(initial.resolve())
-
-    if dialog.ShowDialog() != dialog_result.OK:
-        return None
-
-    selected_paths = [Path(str(file_name)).expanduser() for file_name in dialog.FileNames]
-    return [
-        str((selected.parent if selected.name == "Select this folder" else selected).resolve())
-        for selected in selected_paths
-    ]
 
 
 def _section_options() -> list[str]:

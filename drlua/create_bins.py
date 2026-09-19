@@ -5,6 +5,7 @@ import json
 import os
 import shutil
 import subprocess
+import sys
 
 from datetime import datetime
 from fractions import Fraction
@@ -231,7 +232,11 @@ def collect_stash_export_media_files(input_path: Path):
 
 def probe_media_files_to_clips(media_files: list[Path]) -> list[ClipDataInput]:
     clips: list[ClipDataInput] = []
-    ffprobe_path = shutil.which("ffprobe")
+    ffprobe_path = (
+        str(Path(sys._MEIPASS) / "tools" / "ffmpeg" / "ffprobe.exe")
+        if getattr(sys, "frozen", False)
+        else shutil.which("ffprobe")
+    )
     if not ffprobe_path:
         raise RuntimeError(f"ffprobe not found: {ffprobe_path}")
     for media_file in tqdm(media_files, desc="ffprobe", unit=" clip", position=0):
@@ -249,6 +254,7 @@ def probe_media_files_to_clips(media_files: list[Path]) -> list[ClipDataInput]:
             capture_output=True,
             text=True,
             check=False,
+            creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0,
         )
         if result.returncode != 0:
             continue

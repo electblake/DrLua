@@ -80,7 +80,7 @@ def _build_parser() -> argparse.ArgumentParser:
         "-i",
         "-Interactive",
         action="store_true",
-        help="open the interactive WinForms launcher",
+        help="open the interactive Tkinter launcher",
     )
     parser.add_argument(
         "--files",

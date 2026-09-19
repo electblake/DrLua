@@ -8,6 +8,9 @@ a = Analysis(
     datas=[
         ('drlua\\lua', 'drlua\\lua'),
         ('drlua\\fusion\\*.setting', 'drlua\\fusion'),
+        ('build/vendor/ffprobe.exe', 'tools/ffmpeg'),
+        ('build/vendor/LICENSE', 'tools/ffmpeg'),
+        ('build/vendor/README.txt', 'tools/ffmpeg'),
     ],
     hiddenimports=['drlua.ui.interactive'],
     hookspath=[],
