@@ -77,15 +77,10 @@ def sync_packaged_lua_assets(target_dir: Path = LUA_DIR) -> list[Path]:
 
 sync_packaged_lua_assets()
 
-# If tqdm is installed, configure loguru with tqdm.write
-# https://github.com/Delgan/loguru/issues/135
-try:
-    from tqdm import tqdm
-
-    logger.remove(0)
-    logger.add(lambda msg: tqdm.write(msg, end=""), colorize=True)
-except ModuleNotFoundError:
-    pass
+LOG_PATH = dirs.user_log_path / "drlua.log"
+LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
+logger.remove()
+logger.add(LOG_PATH, encoding="utf-8", format="{time:YYYY-MM-DD HH:mm:ss} | {level} | {message}", catch=False)
 
 class DateFormatTyperOption(enum.Enum):
     long = 'long'

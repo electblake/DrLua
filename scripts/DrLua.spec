@@ -16,16 +16,12 @@ data = [
     (str(root / "build/vendor/SHA256.txt"), "tools/ffmpeg"),
     (str(Path(sys.base_prefix) / "LICENSE.txt"), "licenses/python"),
 ]
-for name in ("loguru", "platformdirs", "tqdm", "luadata", "iterfzf", "colorama"):
+for name in ("loguru", "platformdirs", "luadata", "colorama"):
     package = distribution(name)
     for file in package.files:
         if "license" in file.name.lower() or "copying" in file.name.lower():
             data.append((str(package.locate_file(file)), f"licenses/{name}/{file.parent}"))
 gui = Analysis([str(root / "drlua/gui.py")], pathex=[str(root)], datas=data)
-cli = Analysis([str(root / "drlua/cli.py")], pathex=[str(root)], datas=data)
 gui_exe = EXE(PYZ(gui.pure), gui.scripts, [], exclude_binaries=True,
               name="DrLua", console=False, upx=False)
-cli_exe = EXE(PYZ(cli.pure), cli.scripts, [], exclude_binaries=True,
-              name="drlua-cli", console=True, upx=False)
-COLLECT(gui_exe, cli_exe, gui.binaries, gui.datas, cli.binaries, cli.datas,
-        name=artifact, upx=False)
+COLLECT(gui_exe, gui.binaries, gui.datas, name=artifact, upx=False)

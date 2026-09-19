@@ -12,7 +12,6 @@ from fractions import Fraction
 from pathlib import Path, PurePosixPath
 
 from loguru import logger
-from tqdm import tqdm
 from drlua.config import (
     LUA_DIR,
     PROCESSED_DATA_DIR,
@@ -26,51 +25,6 @@ from drlua.helpers.scenerules import NameTag, ReleaseName
 
 import luadata
 from drlua import __version__
-
-
-def _ask_yes_no(prompt: str, default: bool = False) -> bool:
-    suffix = " [Y/n]" if default else " [y/N]"
-    while True:
-        response = input(f"{prompt}{suffix} ").strip().lower()
-        if not response:
-            return default
-        if response in {"y", "yes"}:
-            return True
-        if response in {"n", "no"}:
-            return False
-
-
-def default_release_name_from_input(input_location: Path) -> str:
-    target = input_location.parent if input_location.is_file() else input_location
-    if target.name:
-        return target.name
-    if input_location.is_file() and input_location.stem:
-        return input_location.stem
-    return target.anchor.rstrip("\\/") or "Release"
-
-
-def prompt_for_section(section_tags: list[str]) -> str:
-    other_label = "Other"
-    choices = ", ".join(section_tags + [other_label])
-    section_choice = input(f"Enter section ({choices}) [{section_tags[0]}]: ").strip()
-    if not section_choice:
-        return section_tags[0]
-    if section_choice != other_label:
-        return section_choice
-
-    custom_section = ""
-    while not custom_section:
-        custom_section = input("Enter custom section: ").strip()
-    return custom_section
-
-
-def prompt_for_tags() -> list[str]:
-    tags: list[str] = []
-    while True:
-        tag_value = input("Enter tag (leave blank to continue): ").strip()
-        if not tag_value:
-            return tags
-        tags.append(tag_value)
 
 
 def lua_header(release_name:ReleaseName, input_location: str|Path, outfile:str|Path):
@@ -141,15 +95,15 @@ def collect_folder_media_files(input_path: Path, recursive:bool=True):
     input_path = Path(input_path).expanduser().resolve()
     media_files: list[Path] = []
     if recursive:
-        for root, _, files in tqdm(os.walk(input_path), desc="walk", position=0, unit=" dir"):
+        for root, _, files in os.walk(input_path):
             root_path = Path(root)
-            for file_name in tqdm(files, desc="collect", position=1, leave=False, unit=" file"):
+            for file_name in files:
                 input_path = (root_path / file_name).resolve()
                 if input_path.suffix.lower() in SUPPORTED_EXTENSIONS:
                     media_files.append(input_path)
     else:
         with os.scandir(input_path) as entries:
-            for entry in tqdm(entries, desc="scan", position=0, unit=" file"):
+            for entry in entries:
                 if not entry.is_file():
                     continue
                 input_path = Path(entry.path).resolve()
@@ -239,7 +193,8 @@ def probe_media_files_to_clips(media_files: list[Path]) -> list[ClipDataInput]:
     )
     if not ffprobe_path:
         raise RuntimeError(f"ffprobe not found: {ffprobe_path}")
-    for media_file in tqdm(media_files, desc="ffprobe", unit=" clip", position=0):
+    for media_file in media_files:
+        logger.info("Probing {}", media_file)
         result = subprocess.run(
             [
                 ffprobe_path,
@@ -326,7 +281,7 @@ def make_bin_groups(clips, release_name: ReleaseName, include_kinds):
         )
 
     output_bins: list[ClipBinGroup] = []
-    for layer, bucket in tqdm(enumerate(sorted(grouped_bins, key=lambda item: item["total_frames"]), start=1), desc="layer buckets"):
+    for layer, bucket in enumerate(sorted(grouped_bins, key=lambda item: item["total_frames"]), start=1):
         vertical = [clip for clip in bucket["clips"] if clip.kind == "Vertical"]
         full = [clip for clip in bucket["clips"] if clip.kind == "Full"]
         vertical.sort(key=lambda item: (item.frames, item.path.name.lower()))
@@ -366,7 +321,7 @@ def make_payload(
     payload_bins: list[dict[str, object]] = []
     logger.trace(f"[make_payload] bin_groups {bin_groups}")
 
-    for index, clips_bin in tqdm(enumerate(bin_groups), position=0, desc="grouping", unit=" bin"):
+    for index, clips_bin in enumerate(bin_groups):
         if index >= 1 and index <= 26:
             layer_suffix = chr(ord("A") + index - 1)
         else:
@@ -398,43 +353,22 @@ def make_payload(
         bins=payload_bins,
     ))
 
-section_tags = ["Fansites", "Civilians", "Inspired"]
-
-
 def create_bins(
     from_locations: list[Path],
-    name: str | None = None,
-    section: str | None = None,
+    name: str,
+    section: str,
     tag: list[str] | None = None,
     group_name: str | None = None,
     recursive: bool = True,
     vertical_only: bool = False,
     full_only: bool = False,
     bins_only: bool = False,
-    version: bool = False,
-    prompt_for_missing_tags: bool = True,
-) -> int | None:
-    if version:
-        from drlua import __version__
-        print(__version__)
-        print(f"DrLua Version: {__version__}")
-        return 0
-
+) -> None:
     tag = list(tag or [])
     input_locations = [Path(from_location).expanduser().resolve() for from_location in from_locations]
-    input_location = input_locations[0]
-    name = name.strip() if name else None
-    section = section.strip() if section else None
+    name = name.strip()
+    section = section.strip()
     tag = [item.strip() for item in tag if item and item.strip()]
-
-    if not name:
-        default_name = default_release_name_from_input(input_location)
-        while not name:
-            name = input(f"Enter name [{default_name}]: ").strip() or default_name
-    if not section:
-        section = prompt_for_section(section_tags)
-    if not tag and prompt_for_missing_tags:
-        tag = prompt_for_tags()
 
     logger.debug(f"Collecting from {input_locations}")
 
@@ -506,4 +440,4 @@ def create_bins(
         dofile,
         "```",
     ]
-    print("\n".join(hint))
+    logger.info("\n".join(hint))

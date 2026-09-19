@@ -1,20 +1,18 @@
 from __future__ import annotations
 
-from contextlib import redirect_stderr, redirect_stdout
-import io
+from concurrent.futures import ThreadPoolExecutor
 import os
 from pathlib import Path
-from queue import SimpleQueue
 import re
-from threading import Thread
+import sys
 import tkinter as tk
-from tkinter import filedialog, font, ttk
-import traceback
+from tkinter import filedialog, font, messagebox, ttk
 
 from drlua import __version__
-from drlua.config import PROCESSED_DATA_DIR
+from drlua.config import LOG_PATH, PROCESSED_DATA_DIR
 from drlua.create_bins import create_bins
 from drlua.section_category_data import SECTION_CATEGORY_DATA
+from drlua.updates import download_setup, latest_release, version_tuple
 
 
 def _default_release_name(path_value: str) -> str:
@@ -36,36 +34,30 @@ def _run_create_bins_from_form(
     section: str,
     group: str,
     tags: list[str],
-) -> tuple[int, str]:
-    output = io.StringIO()
-    result = 0
-
-    with redirect_stdout(output), redirect_stderr(output):
-        try:
-            create_result = create_bins(
-                [Path(source_path) for source_path in source_paths],
-                name=name or None,
-                section=section or None,
-                group_name=group or None,
-                tag=tags,
-                prompt_for_missing_tags=False,
-            )
-            result = int(create_result or 0)
-        except Exception:
-            result = 1
-            traceback.print_exc()
-
-    return result, output.getvalue().rstrip()
+) -> None:
+    create_bins(
+        [Path(source_path) for source_path in source_paths],
+        name=name,
+        section=section,
+        group_name=group or None,
+        tag=tags,
+    )
 
 
-class LauncherView(ttk.Frame):
+class ApplicationView(ttk.Frame):
     def __init__(self, parent: tk.Misc, input_paths: list[Path] | None = None):
         super().__init__(parent, padding=16)
         self.columnconfigure(0, weight=1)
         self.rowconfigure(1, weight=1)
-        self.events = SimpleQueue()
+        self.executor = ThreadPoolExecutor(max_workers=1)
+        self.log_path = LOG_PATH
+        with self.log_path.open(encoding="utf-8") as stream:
+            stream.read()
+            self.log_position = stream.tell()
         self.busy = False
         self.poll_id = None
+        self.update_poll_id = None
+        self.setup_path = None
         self.name = tk.StringVar(self)
         self.section = tk.StringVar(self)
         self.category = tk.StringVar(self)
@@ -77,6 +69,8 @@ class LauncherView(ttk.Frame):
         self.title_font = font.Font(self, family="Segoe UI", size=20, weight="bold")
         ttk.Label(heading, text="DrLua", font=self.title_font).pack(side="left")
         ttk.Label(heading, text=f"v{__version__}  ·  DaVinci Resolve Lua scripts").pack(side="left", padx=14)
+        self.check_updates = ttk.Button(heading, text="Check for updates", command=self.check_for_updates)
+        self.check_updates.pack(side="right")
 
         panes = ttk.Panedwindow(self, orient=tk.VERTICAL)
         panes.grid(row=1, column=0, sticky="nsew")
@@ -129,7 +123,7 @@ class LauncherView(ttk.Frame):
         actions = ttk.Frame(form)
         actions.grid(row=4, column=0, sticky="ew")
         actions.columnconfigure(1, weight=1)
-        self.send = ttk.Button(actions, text="Send to DrLua", command=self.submit, state="disabled")
+        self.send = ttk.Button(actions, text="Generate Lua script", command=self.submit, state="disabled")
         self.send.grid(row=0, column=0, sticky="w")
         self.progress = ttk.Progressbar(actions, mode="indeterminate")
         self.progress.grid(row=0, column=1, sticky="ew", padx=12)
@@ -214,28 +208,35 @@ class LauncherView(ttk.Frame):
                 self.group.get().strip(), _split_tags(self.tags.get("1.0", "end-1c")))
         self.busy = True
         self.send.state(["disabled"])
+        self.check_updates.state(["disabled"])
         self.status.set("Generating Lua script…")
         self.progress.grid()
         self.progress.start(12)
-        self.append_output("Running: drlua " + " ".join(_preview_arguments(*args)) + "\n\n")
-        Thread(target=self.run_generation, args=args, daemon=True).start()
+        self.future = self.executor.submit(_run_create_bins_from_form, *args)
         self.poll_id = self.after(100, self.poll_result)
 
-    def run_generation(self, *args):
-        self.events.put(_run_create_bins_from_form(*args))
+    def refresh_output(self):
+        with self.log_path.open(encoding="utf-8") as stream:
+            stream.seek(self.log_position)
+            output = stream.read()
+            self.log_position = stream.tell()
+        if output:
+            self.append_output(output)
 
     def poll_result(self):
         self.poll_id = None
-        if self.events.empty():
+        self.refresh_output()
+        if not self.future.done():
             self.poll_id = self.after(100, self.poll_result)
             return
-        result, output = self.events.get()
-        self.append_output(output + f"\nExit code: {result}\n\n")
         self.busy = False
+        self.check_updates.state(["!disabled"])
         self.progress.stop()
         self.progress.grid_remove()
         self.source_edited()
-        self.status.set("Lua script created. Paste the dofile command into Resolve." if result == 0 else "Generation failed. See output for the traceback.")
+        self.future.result()
+        self.refresh_output()
+        self.status.set("Lua script created. Paste the dofile command into Resolve.")
 
     def open_output(self):
         folder = PROCESSED_DATA_DIR / "create_bins"
@@ -246,23 +247,84 @@ class LauncherView(ttk.Frame):
         self.clipboard_clear()
         self.clipboard_append(self.output.get("1.0", "end-1c"))
 
+    def check_for_updates(self):
+        self.busy = True
+        self.send.state(["disabled"])
+        self.check_updates.state(["disabled"])
+        self.status.set("Checking for updates…")
+        self.update_future = self.executor.submit(latest_release)
+        self.update_poll_id = self.after(100, self.poll_update)
+
+    def poll_update(self):
+        self.update_poll_id = None
+        if not self.update_future.done():
+            self.update_poll_id = self.after(100, self.poll_update)
+            return
+        release = self.update_future.result()
+        if version_tuple(release["tag_name"]) > version_tuple(__version__):
+            if messagebox.askyesno(
+                "DrLua update available",
+                f"DrLua {release['tag_name']} is available.\n\n"
+                "Download the update and close DrLua to run setup?\n"
+                "The current form will be discarded.",
+                parent=self,
+            ):
+                self.status.set("Downloading update…")
+                self.update_future = self.executor.submit(download_setup, release)
+                self.update_poll_id = self.after(100, self.poll_download)
+                return
+            self.status.set("Update cancelled.")
+        else:
+            self.status.set(f"DrLua {__version__} is up to date.")
+        self.busy = False
+        self.source_edited()
+        self.check_updates.state(["!disabled"])
+
+    def poll_download(self):
+        self.update_poll_id = None
+        if not self.update_future.done():
+            self.update_poll_id = self.after(100, self.poll_download)
+            return
+        self.setup_path = self.update_future.result()
+        self.winfo_toplevel().destroy()
+
     def destroy(self):
         if self.poll_id is not None:
             self.after_cancel(self.poll_id)
+        if self.update_poll_id is not None:
+            self.after_cancel(self.update_poll_id)
         self.progress.stop()
+        self.executor.shutdown(wait=False)
         super().destroy()
 
 
-def launch_interactive(input_paths: list[Path] | None = None) -> int:
+def run_application(input_paths: list[Path] | None = None) -> int:
+    if sys.platform == "win32":
+        import ctypes
+        from ctypes import wintypes
+
+        create_mutex = ctypes.windll.kernel32.CreateMutexW
+        create_mutex.argtypes = [wintypes.LPVOID, wintypes.BOOL, wintypes.LPCWSTR]
+        create_mutex.restype = wintypes.HANDLE
+        mutex = create_mutex(None, False, "electblake.DrLua.Running")
+
     root = tk.Tk()
-    root.title(f"DrLua Launcher v{__version__}")
+    root.title(f"DrLua v{__version__}")
     root.geometry("920x780")
     root.minsize(700, 660)
     root.columnconfigure(0, weight=1)
     root.rowconfigure(0, weight=1)
-    view = LauncherView(root, input_paths)
+    view = ApplicationView(root, input_paths)
     view.grid(row=0, column=0, sticky="nsew")
     root.mainloop()
+    view.executor.shutdown(wait=True)
+    if sys.platform == "win32":
+        close_handle = ctypes.windll.kernel32.CloseHandle
+        close_handle.argtypes = [wintypes.HANDLE]
+        close_handle.restype = wintypes.BOOL
+        close_handle(mutex)
+    if view.setup_path is not None:
+        os.startfile(view.setup_path)
     return 0
 
 
@@ -363,22 +425,3 @@ def _path_is_under(selected_text: str, root_path: str) -> bool:
         return False
     root_text = root_path.casefold()
     return selected_text == root_text or selected_text.startswith(f"{root_text}\\") or selected_text.startswith(f"{root_text}/")
-
-
-def _preview_arguments(source_paths: list[str], name: str, section: str, group: str, tags: list[str]) -> list[str]:
-    arguments = [source_path.strip() for source_path in source_paths]
-    if name.strip():
-        arguments.extend(["--name", name.strip()])
-    if section.strip():
-        arguments.extend(["--section", section.strip()])
-    if group.strip():
-        arguments.extend(["--group", group.strip()])
-    for tag in tags:
-        arguments.extend(["--tag", tag])
-    return [_quote_preview_argument(argument) for argument in arguments]
-
-
-def _quote_preview_argument(argument: str) -> str:
-    if re.search(r'\s|"', argument):
-        return '"' + argument.replace('"', '\\"') + '"'
-    return argument

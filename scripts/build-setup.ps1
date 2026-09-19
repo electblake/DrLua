@@ -22,6 +22,5 @@ uv venv --clear build/installer-venv --python 3.12.9
 uv export --locked --all-groups --no-emit-project --format requirements-txt --output-file build/installer-requirements.txt
 uv pip sync --python build/installer-venv/Scripts/python.exe build/installer-requirements.txt
 & build/installer-venv/Scripts/python.exe -I -m PyInstaller --clean --noconfirm scripts/DrLua.spec
-& "dist/$artifact/drlua-cli.exe" . --version
 & $IsccPath "/DAppVersion=$version" scripts/DrLua.iss
 Get-FileHash "dist/$artifact-Setup.exe" -Algorithm SHA256

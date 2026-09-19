@@ -3,6 +3,7 @@
 
 [Setup]
 AppId=electblake.DrLua
+AppMutex=electblake.DrLua.Running
 AppName={#AppName}
 AppVersion={#AppVersion}
 AppPublisher=electblake
@@ -37,3 +38,11 @@ Name: "{autodesktop}\DrLua"; Filename: "{app}\DrLua.exe"; WorkingDir: "{app}"; T
 
 [Run]
 Filename: "{app}\DrLua.exe"; Description: "{cm:LaunchProgram,DrLua}"; Flags: nowait postinstall skipifsilent
+
+[Code]
+function PrepareToInstall(var NeedsRestart: Boolean): String;
+begin
+  Result := '';
+  if CheckForMutexes('electblake.DrLua.Running') then
+    Result := 'Please close all DrLua windows before continuing setup.';
+end;
