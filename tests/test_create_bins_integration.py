@@ -18,16 +18,27 @@ def test_create_bins_with_sample_videos(tmp_path: Path, monkeypatch: pytest.Monk
 
     log_path = tmp_path / "generation.log"
     sink = logger.add(log_path, catch=False)
+    progress = []
     result = create_bins_module.create_bins(
         [sample_dir],
         name="Sample",
         section="Fansites",
         tag=["integration"],
         vertical_only=True,
+        progress=lambda *event: progress.append(event),
     )
 
     logger.remove(sink)
     assert result is None
+    assert progress[0] == ("Scanning sources", 0, 1)
+    probing = [event for event in progress if event[0] == "Probing media"]
+    total = probing[0][2]
+    assert [event[1] for event in probing] == list(range(total + 1))
+    assert progress[-3:] == [
+        ("Grouping clips", total, total),
+        ("Writing Lua script", total, total),
+        ("Complete", total, total),
+    ]
 
     generated_files = list((tmp_path / "processed" / "create_bins").glob("*.lua"))
     assert len(generated_files) == 1

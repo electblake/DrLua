@@ -69,7 +69,10 @@ def test_generation_uses_form_values_and_reenables_button(launcher, monkeypatch,
 
     def generate(paths, **kwargs):
         calls.append((paths, kwargs))
+        kwargs["progress"]("Probing media", 0, len(paths))
         logger.info("dofile([[generated.lua]])")
+        kwargs["progress"]("Probing media", len(paths), len(paths))
+        kwargs["progress"]("Complete", len(paths), len(paths))
 
     monkeypatch.setattr(application, "create_bins", generate)
     view.append_sources([str(tmp_path / "one.mp4"), str(tmp_path / "two.mp4")])
@@ -88,6 +91,8 @@ def test_generation_uses_form_values_and_reenables_button(launcher, monkeypatch,
     assert not view.busy
     assert view.check_updates.instate(["!disabled"])
     assert view.send.instate(["!disabled"])
+    assert "Lua script created: 2/2 items" in view.status.get()
+    assert float(view.progress["value"]) == float(view.progress["maximum"])
     assert calls[0][0] == [tmp_path / "one.mp4", tmp_path / "two.mp4"]
     assert calls[0][1]["name"] == "My release"
     assert calls[0][1]["group_name"] == "My group"
@@ -104,6 +109,9 @@ def test_resize_and_keyboard_focus(launcher):
     root.geometry("700x660")
     root.update()
     small = view.output.winfo_width()
+    assert view.send.winfo_rooty() > view.output.master.winfo_rooty() + view.output.master.winfo_height()
+    status_label = view.grid_slaves(row=3, column=0)[0]
+    assert status_label.winfo_rooty() > view.send.winfo_rooty() + view.send.winfo_height()
     assert view.send.winfo_rooty() + view.send.winfo_height() < root.winfo_rooty() + root.winfo_height()
     root.geometry("1200x900")
     root.update()
@@ -175,12 +183,22 @@ def test_update_download_closes_app_before_launch(monkeypatch, tmp_path):
     setup = tmp_path / "DrLua-99.0.0-windows-amd64-Setup.exe"
     events = []
     root = Mock()
+    mutex_name = f"DrLua.Test.{tmp_path.name}"
+    create_mutex = ctypes.windll.kernel32.CreateMutexW
+    create_mutex.argtypes = [wintypes.LPVOID, wintypes.BOOL, wintypes.LPCWSTR]
+    create_mutex.restype = wintypes.HANDLE
+
+    def create_test_mutex(attributes, owner, name):
+        assert name == "electblake.DrLua.Running"
+        return create_mutex(attributes, owner, mutex_name)
+
+    monkeypatch.setattr(ctypes.windll.kernel32, "CreateMutexW", create_test_mutex)
     open_mutex = ctypes.windll.kernel32.OpenMutexW
     open_mutex.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.LPCWSTR]
     open_mutex.restype = wintypes.HANDLE
 
     def mainloop():
-        handle = open_mutex(0x00100000, False, "electblake.DrLua.Running")
+        handle = open_mutex(0x00100000, False, mutex_name)
         assert handle
         close_handle = ctypes.windll.kernel32.CloseHandle
         close_handle.argtypes = [wintypes.HANDLE]
@@ -193,7 +211,7 @@ def test_update_download_closes_app_before_launch(monkeypatch, tmp_path):
     view = SimpleNamespace(executor=executor, setup_path=setup, grid=Mock())
 
     def launch(path):
-        assert not open_mutex(0x00100000, False, "electblake.DrLua.Running")
+        assert not open_mutex(0x00100000, False, mutex_name)
         assert path == setup
         assert events == ["closed", "workers finished"]
         events.append("launched")
@@ -244,3 +262,44 @@ def test_current_release_keeps_app_open(launcher, monkeypatch):
     assert "up to date" in view.status.get()
     assert view.setup_path is None
     assert view.check_updates.instate(["!disabled"])
+
+
+def test_progress_counts_rate_eta_and_finalization(launcher, monkeypatch):
+    from queue import SimpleQueue
+
+    root, view = launcher
+    view.progress_events = SimpleQueue()
+    view.progress_stage = "Scanning sources"
+    view.progress_events.put(("Probing media", 0, 10, 100.0))
+    view.refresh_progress()
+    assert "ETA —" in view.status.get()
+    view.progress_events.put(("Probing media", 4, 10, 102.0))
+    monkeypatch.setattr(application.time, "perf_counter", lambda: 102.0)
+    view.refresh_progress()
+    assert float(view.progress["value"]) == 4
+    assert float(view.progress["maximum"]) == 12
+    assert "4/10 items" in view.status.get()
+    assert "2.00 items/s" in view.status.get()
+    assert "ETA 0:03" in view.status.get()
+
+    # Recompute while the next probe is still running, without a new event.
+    monkeypatch.setattr(application.time, "perf_counter", lambda: 104.0)
+    view.refresh_progress()
+    assert "1.00 items/s" in view.status.get()
+    assert "ETA 0:06" in view.status.get()
+    view.progress_events.put(("Probing media", 10, 10, 105.0))
+    view.progress_events.put(("Grouping clips", 10, 10, 105.1))
+    view.refresh_progress()
+    assert "Grouping clips" in view.status.get()
+    assert "ETA finalizing" in view.status.get()
+    assert float(view.progress["value"]) < float(view.progress["maximum"])
+    view.progress_events.put(("Writing Lua script", 10, 10, 105.2))
+    view.refresh_progress()
+    assert "Writing Lua script" in view.status.get()
+    assert float(view.progress["value"]) == 11
+    view.progress_events.put(("Complete", 10, 10, 105.3))
+    view.refresh_progress()
+    assert float(view.progress["value"]) == float(view.progress["maximum"])
+    assert "Lua script created: 10/10 items" in view.status.get()
+    assert "2.00 items/s" in view.status.get()
+    assert "ETA 0:00" in view.status.get()

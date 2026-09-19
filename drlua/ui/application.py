@@ -1,10 +1,14 @@
 from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor
+from collections.abc import Callable
+import math
 import os
 from pathlib import Path
+from queue import SimpleQueue
 import re
 import sys
+import time
 import tkinter as tk
 from tkinter import filedialog, font, messagebox, ttk
 
@@ -34,6 +38,7 @@ def _run_create_bins_from_form(
     section: str,
     group: str,
     tags: list[str],
+    progress: Callable[[str, int, int], None] | None = None,
 ) -> None:
     create_bins(
         [Path(source_path) for source_path in source_paths],
@@ -41,6 +46,7 @@ def _run_create_bins_from_form(
         section=section,
         group_name=group or None,
         tag=tags,
+        progress=progress,
     )
 
 
@@ -120,14 +126,13 @@ class ApplicationView(ttk.Frame):
         tag_scroll.grid(row=0, column=1, sticky="ns")
         self.tags.configure(yscrollcommand=tag_scroll.set)
 
-        actions = ttk.Frame(form)
-        actions.grid(row=4, column=0, sticky="ew")
+        actions = ttk.Frame(self)
+        actions.grid(row=2, column=0, sticky="ew", pady=(12, 0))
         actions.columnconfigure(1, weight=1)
         self.send = ttk.Button(actions, text="Generate Lua script", command=self.submit, state="disabled")
         self.send.grid(row=0, column=0, sticky="w")
-        self.progress = ttk.Progressbar(actions, mode="indeterminate")
+        self.progress = ttk.Progressbar(actions, mode="determinate")
         self.progress.grid(row=0, column=1, sticky="ew", padx=12)
-        self.progress.grid_remove()
         ttk.Button(actions, text="Open output folder", command=self.open_output).grid(row=0, column=2)
 
         output_frame = ttk.LabelFrame(panes, text="Output", padding=10)
@@ -140,7 +145,7 @@ class ApplicationView(ttk.Frame):
         output_scroll.grid(row=0, column=1, sticky="ns")
         self.output.configure(yscrollcommand=output_scroll.set)
         ttk.Button(output_frame, text="Copy output", command=self.copy_output).grid(row=1, column=0, sticky="e", pady=(8, 0))
-        ttk.Label(self, textvariable=self.status).grid(row=2, column=0, sticky="w", pady=(10, 0))
+        ttk.Label(self, textvariable=self.status).grid(row=3, column=0, sticky="w", pady=(10, 0))
 
         self.section.trace_add("write", self.section_changed)
         self.category.trace_add("write", self.category_changed)
@@ -209,10 +214,18 @@ class ApplicationView(ttk.Frame):
         self.busy = True
         self.send.state(["disabled"])
         self.check_updates.state(["disabled"])
-        self.status.set("Generating Lua script…")
-        self.progress.grid()
-        self.progress.start(12)
-        self.future = self.executor.submit(_run_create_bins_from_form, *args)
+        self.status.set("Scanning sources…  |  — items/s  |  ETA —")
+        self.progress.configure(value=0, maximum=1)
+        self.progress_events = SimpleQueue()
+        self.progress_stage = "Scanning sources"
+        self.progress_completed = 0
+        self.progress_total = len(args[0])
+        self.future = self.executor.submit(
+            _run_create_bins_from_form, *args,
+            progress=lambda stage, completed, total: self.progress_events.put(
+                (stage, completed, total, time.perf_counter())
+            ),
+        )
         self.poll_id = self.after(100, self.poll_result)
 
     def refresh_output(self):
@@ -226,17 +239,51 @@ class ApplicationView(ttk.Frame):
     def poll_result(self):
         self.poll_id = None
         self.refresh_output()
+        self.refresh_progress()
         if not self.future.done():
             self.poll_id = self.after(100, self.poll_result)
             return
         self.busy = False
         self.check_updates.state(["!disabled"])
-        self.progress.stop()
-        self.progress.grid_remove()
         self.source_edited()
         self.future.result()
         self.refresh_output()
-        self.status.set("Lua script created. Paste the dofile command into Resolve.")
+        self.refresh_progress()
+
+    def refresh_progress(self):
+        while not self.progress_events.empty():
+            stage, completed, total, timestamp = self.progress_events.get()
+            if stage == "Probing media" and self.progress_stage != stage:
+                self.probe_started = timestamp
+            if stage == "Probing media":
+                self.probe_finished = timestamp
+            self.progress_stage = stage
+            self.progress_completed = completed
+            self.progress_total = total
+
+        stage = self.progress_stage
+        completed = self.progress_completed
+        total = self.progress_total
+        if stage == "Scanning sources":
+            self.progress.configure(maximum=total, value=completed)
+            self.status.set(f"Scanning sources: {completed}/{total}  |  — items/s  |  ETA —")
+            return
+
+        # Grouping and writing each finish one additional work step after probing.
+        value = completed + (1 if stage == "Writing Lua script" else 2 if stage == "Complete" else 0)
+        self.progress.configure(maximum=total + 2, value=value)
+        if completed == 0:
+            metrics = "— items/s  |  ETA —"
+        else:
+            end = time.perf_counter() if stage == "Probing media" else self.probe_finished
+            rate = completed / (end - self.probe_started)
+            seconds = math.ceil((total - completed) / rate)
+            eta = f"{seconds // 60}:{seconds % 60:02d}"
+            if stage in ("Grouping clips", "Writing Lua script"):
+                eta = "finalizing"
+            metrics = f"{rate:.2f} items/s  |  ETA {eta}"
+        label = "Lua script created" if stage == "Complete" else stage
+        self.status.set(f"{label}: {completed}/{total} items  |  {metrics}")
 
     def open_output(self):
         folder = PROCESSED_DATA_DIR / "create_bins"

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass, field
+from collections.abc import Callable
 import json
 import os
 import shutil
@@ -184,7 +185,10 @@ def collect_stash_export_media_files(input_path: Path):
     return media_files
 
 
-def probe_media_files_to_clips(media_files: list[Path]) -> list[ClipDataInput]:
+def probe_media_files_to_clips(
+    media_files: list[Path],
+    progress: Callable[[str, int, int], None] | None = None,
+) -> list[ClipDataInput]:
     clips: list[ClipDataInput] = []
     ffprobe_path = (
         str(Path(sys._MEIPASS) / "tools" / "ffmpeg" / "ffprobe.exe")
@@ -193,7 +197,9 @@ def probe_media_files_to_clips(media_files: list[Path]) -> list[ClipDataInput]:
     )
     if not ffprobe_path:
         raise RuntimeError(f"ffprobe not found: {ffprobe_path}")
-    for media_file in media_files:
+    for index, media_file in enumerate(media_files):
+        if progress is not None:
+            progress("Probing media", index, len(media_files))
         logger.info("Probing {}", media_file)
         result = subprocess.run(
             [
@@ -259,6 +265,8 @@ def probe_media_files_to_clips(media_files: list[Path]) -> list[ClipDataInput]:
                 file_created=file_birth_date,
             )
         )
+    if progress is not None:
+        progress("Probing media", len(media_files), len(media_files))
     return clips
 
 def make_bin_groups(clips, release_name: ReleaseName, include_kinds):
@@ -363,6 +371,7 @@ def create_bins(
     vertical_only: bool = False,
     full_only: bool = False,
     bins_only: bool = False,
+    progress: Callable[[str, int, int], None] | None = None,
 ) -> None:
     tag = list(tag or [])
     input_locations = [Path(from_location).expanduser().resolve() for from_location in from_locations]
@@ -373,7 +382,9 @@ def create_bins(
     logger.debug(f"Collecting from {input_locations}")
 
     media_files = []
-    for input_location_item in input_locations:
+    for index, input_location_item in enumerate(input_locations):
+        if progress is not None:
+            progress("Scanning sources", index, len(input_locations))
         if input_location_item.is_dir():
             collected_files = collect_folder_media_files(input_location_item, recursive)
             if len(collected_files) == 0 and len(list(input_location_item.glob("**/*.json"))) > 0:
@@ -395,7 +406,7 @@ def create_bins(
 
     logger.debug(f"Collected {len(media_files)} media files..")
 
-    clips = probe_media_files_to_clips(media_files)
+    clips = probe_media_files_to_clips(media_files, progress)
 
     if len(clips) == 0:
         raise RuntimeError(f"No readable video clips found in {input_locations}.")
@@ -408,6 +419,8 @@ def create_bins(
     out_file_path = PROCESSED_DATA_DIR / "create_bins" / release_name.file_name()
     include_kinds = make_include_kinds_from_args(vertical_only, full_only)
 
+    if progress is not None:
+        progress("Grouping clips", len(media_files), len(media_files))
     output_bins = make_bin_groups(clips, release_name, include_kinds)
     if len(output_bins) == 0:
         raise RuntimeError(f"No output bins could be created for kinds: {', '.join(include_kinds)}")
@@ -418,6 +431,8 @@ def create_bins(
     if not payload:
         raise RuntimeError("payload empty")
 
+    if progress is not None:
+        progress("Writing Lua script", len(media_files), len(media_files))
     header = lua_header(release_name, input_locations, out_file_path)
     out_file_path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -441,3 +456,5 @@ def create_bins(
         "```",
     ]
     logger.info("\n".join(hint))
+    if progress is not None:
+        progress("Complete", len(media_files), len(media_files))
