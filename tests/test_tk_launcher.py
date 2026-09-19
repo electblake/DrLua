@@ -135,6 +135,35 @@ def test_form_generates_real_lua(tmp_path, monkeypatch):
     assert len(list((tmp_path / "create_bins").glob("*.lua"))) == 1
 
 
+def test_generate_button_runs_real_media_and_reports_progress(launcher, monkeypatch, tmp_path):
+    from drlua import create_bins
+
+    root, view = launcher
+    monkeypatch.setattr(create_bins, "PROCESSED_DATA_DIR", tmp_path)
+    sample = Path(__file__).resolve().parents[1] / "data" / "sample"
+    view.append_sources([str(sample)])
+    view.name.set("Button integration")
+    root.update()
+    view.send.event_generate("<ButtonPress-1>", x=10, y=10)
+    view.send.event_generate("<ButtonRelease-1>", x=10, y=10)
+    assert view.busy
+    statuses = []
+    deadline = time.monotonic() + 30
+    while view.busy and time.monotonic() < deadline:
+        root.update()
+        statuses.append(view.status.get())
+        time.sleep(0.01)
+    assert not view.busy
+    assert any("Probing media:" in status for status in statuses)
+    assert "Lua script created:" in view.status.get()
+    assert float(view.progress["value"]) == float(view.progress["maximum"])
+    assert view.send.instate(["!disabled"])
+    generated = list((tmp_path / "create_bins").glob("*.lua"))
+    assert len(generated) == 1
+    assert "CreateBins(" in generated[0].read_text(encoding="utf-8")
+    assert "dofile([[" in view.output.get("1.0", "end")
+
+
 def test_output_tails_new_log_content_once(launcher):
     root, view = launcher
     logger.info("First update")

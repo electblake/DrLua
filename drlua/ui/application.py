@@ -51,7 +51,7 @@ def _run_create_bins_from_form(
 
 
 class ApplicationView(ttk.Frame):
-    def __init__(self, parent: tk.Misc, input_paths: list[Path] | None = None):
+    def __init__(self, parent: tk.Misc):
         super().__init__(parent, padding=16)
         self.columnconfigure(0, weight=1)
         self.rowconfigure(1, weight=1)
@@ -151,8 +151,6 @@ class ApplicationView(ttk.Frame):
         self.category.trace_add("write", self.category_changed)
         section_options = _section_options()
         self.section.set(section_options[0] if section_options else "")
-        if input_paths:
-            self.append_sources([str(path.expanduser().resolve()) for path in input_paths])
         self.sources.focus_set()
 
     def source_edited(self, _event=None):
@@ -345,7 +343,7 @@ class ApplicationView(ttk.Frame):
         super().destroy()
 
 
-def run_application(input_paths: list[Path] | None = None) -> int:
+def run_application() -> int:
     if sys.platform == "win32":
         import ctypes
         from ctypes import wintypes
@@ -361,7 +359,7 @@ def run_application(input_paths: list[Path] | None = None) -> int:
     root.minsize(700, 660)
     root.columnconfigure(0, weight=1)
     root.rowconfigure(0, weight=1)
-    view = ApplicationView(root, input_paths)
+    view = ApplicationView(root)
     view.grid(row=0, column=0, sticky="nsew")
     root.mainloop()
     view.executor.shutdown(wait=True)
