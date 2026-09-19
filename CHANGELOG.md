@@ -7,6 +7,13 @@ and this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ## [Unreleased]
 
+## [0.3.1] - 2026-09-19
+
+### Changed
+
+- Make the desktop launcher UI-only by removing the unused programmatic input-path injection path.
+- Exercise the actual Generate button against real media in integration coverage, including progress and Lua output assertions.
+
 ## [0.3.0] - 2026-09-18
 
 ### Added
@@ -56,7 +63,8 @@ and this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 - Import media from folders, Everything file lists, metadata CSV files, and Stash exports.
 - Provide an interactive Windows launcher, generated Lua file management, and Windows Explorer context menu integration.
 
-[Unreleased]: https://github.com/electblake/DrLua/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/electblake/DrLua/compare/v0.3.1...HEAD
+[0.3.1]: https://github.com/electblake/DrLua/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/electblake/DrLua/compare/v0.2.3...v0.3.0
 [0.2.3]: https://github.com/electblake/DrLua/compare/v0.2.2...v0.2.3
 [0.2.2]: https://github.com/electblake/DrLua/compare/v0.2.1...v0.2.2
