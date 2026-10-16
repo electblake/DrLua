@@ -11,6 +11,7 @@ dependencies = [
     "loguru>=0.7.3",
     "luadata>=1.0.5",
     "platformdirs>=4.10.0",
+    "pyside6>=6.10,<7",
     "ruff>=0.15.16",
 ]
 
@@ -22,7 +23,7 @@ include = ["drlua*"]
 namespaces = true
 
 [tool.setuptools.package-data]
-drlua = ["lua/*.lua", "fusion/*.setting"]
+drlua = ["lua/*.lua", "fusion/*.setting", "ui/qml/*.qml"]
 
 [dependency-groups]
 dev = [

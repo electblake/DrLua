@@ -5,7 +5,6 @@ from collections.abc import Callable
 import json
 import os
 import shutil
-import subprocess
 import sys
 
 from datetime import datetime
@@ -13,6 +12,7 @@ from fractions import Fraction
 from pathlib import Path, PurePosixPath
 
 from loguru import logger
+from PySide6.QtCore import QProcess
 from drlua.config import (
     LUA_DIR,
     PROCESSED_DATA_DIR,
@@ -201,24 +201,13 @@ def probe_media_files_to_clips(
         if progress is not None:
             progress("Probing media", index, len(media_files))
         logger.info("Probing {}", media_file)
-        result = subprocess.run(
-            [
-                ffprobe_path,
-                "-v",
-                "error",
-                "-show_entries",
-                "stream=codec_type,codec_name,width,height,nb_frames,avg_frame_rate,r_frame_rate,duration:format=duration",
-                "-of",
-                "json",
-                str(media_file),
-            ],
-            capture_output=True,
-            text=True,
-            check=False,
-            creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0,
-        )
-        if result.returncode != 0:
-            continue
+        process = QProcess()
+        process.start(ffprobe_path, [
+            "-v", "error", "-show_entries",
+            "stream=codec_type,codec_name,width,height,nb_frames,avg_frame_rate,r_frame_rate,duration:format=duration",
+            "-of", "json", str(media_file),
+        ])
+        process.waitForFinished(-1)
 
         file_stat = media_file.stat()
         file_size = file_stat.st_size
@@ -226,29 +215,26 @@ def probe_media_files_to_clips(
         file_birth_ts = getattr(file_stat, "st_birthtime", file_stat.st_mtime)
         file_birth_date = datetime.fromtimestamp(file_birth_ts).isoformat(timespec="seconds")
 
-        try:
-            payload = json.loads(result.stdout)
-            streams = payload.get("streams") or []
-            video_stream = next((item for item in streams if item.get("codec_type") == "video"), None)
-            if video_stream is None:
-                raise ValueError("missing video stream")
-            audio_stream = next((item for item in streams if item.get("codec_type") == "audio"), None)
+        payload = json.loads(bytes(process.readAllStandardOutput()))
+        streams = payload.get("streams") or []
+        video_stream = next((item for item in streams if item.get("codec_type") == "video"), None)
+        if video_stream is None:
+            raise ValueError("missing video stream")
+        audio_stream = next((item for item in streams if item.get("codec_type") == "audio"), None)
 
-            width = int(video_stream.get("width") or 0)
-            height = int(video_stream.get("height") or 0)
-            fps_text = video_stream.get("avg_frame_rate") or video_stream.get("r_frame_rate") or "0/0"
-            fps = float(Fraction(str(fps_text))) if fps_text not in {"0/0", "", "0"} else 0.0
-            frames_text = str(video_stream.get("nb_frames") or "").strip()
-            frames = int(frames_text) if frames_text.isdigit() else 0
-            duration = float(video_stream.get("duration") or (payload.get("format") or {}).get("duration") or 0)
-            video_codec = str(video_stream.get("codec_name") or "unknown")
-            audio_codec = str(audio_stream.get("codec_name") or "noaudio") if audio_stream else "noaudio"
-            if not frames:
-                frames = round(float(duration) * fps) if fps and duration else 0
-            if frames <= 0:
-                raise ValueError("missing usable frame metadata")
-        except Exception:
-            continue
+        width = int(video_stream.get("width") or 0)
+        height = int(video_stream.get("height") or 0)
+        fps_text = video_stream.get("avg_frame_rate") or video_stream.get("r_frame_rate") or "0/0"
+        fps = float(Fraction(str(fps_text))) if fps_text not in {"0/0", "", "0"} else 0.0
+        frames_text = str(video_stream.get("nb_frames") or "").strip()
+        frames = int(frames_text) if frames_text.isdigit() else 0
+        duration = float(video_stream.get("duration") or (payload.get("format") or {}).get("duration") or 0)
+        video_codec = str(video_stream.get("codec_name") or "unknown")
+        audio_codec = str(audio_stream.get("codec_name") or "noaudio") if audio_stream else "noaudio"
+        if not frames:
+            frames = round(float(duration) * fps) if fps and duration else 0
+        if frames <= 0:
+            raise ValueError("missing usable frame metadata")
 
         clips.append(
             ClipDataInput(

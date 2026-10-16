@@ -1,5 +1,11 @@
 # -*- mode: python ; coding: utf-8 -*-
+from importlib.metadata import distribution
+from pathlib import Path
+import os
 
+qt_root = Path(distribution("PySide6-Essentials").locate_file("PySide6"))
+# Resolve native dependencies from this Qt distribution and Windows, not unrelated PATH tools.
+os.environ["PATH"] = os.pathsep.join((str(qt_root), str(Path(os.environ["SystemRoot"]) / "System32")))
 
 a = Analysis(
     ['drlua\\gui.py'],
@@ -8,6 +14,7 @@ a = Analysis(
     datas=[
         ('drlua\\lua', 'drlua\\lua'),
         ('drlua\\fusion\\*.setting', 'drlua\\fusion'),
+        ('drlua/ui/qml', 'drlua/ui/qml'),
         ('build/vendor/ffprobe.exe', 'tools/ffmpeg'),
         ('build/vendor/LICENSE', 'tools/ffmpeg'),
         ('build/vendor/README.txt', 'tools/ffmpeg'),
@@ -16,7 +23,7 @@ a = Analysis(
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
-    excludes=[],
+    excludes=['tkinter', '_tkinter'],
     noarchive=False,
     optimize=0,
 )
