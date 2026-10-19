@@ -10,8 +10,10 @@
 
 Run `uv run drlua` to open the PySide6 / Qt Widgets application using the platform default style.
 Add folders and files, or enter one source path per line. The first source suggests
-the name, section, and category. Selecting a category fills its suggested tags;
-the name, section, category, group, and tags remain editable.
+the name. Choose a section and category from the shared options defined in
+`drlua/section_category_data.py`. Selecting a category fills the tags with its name;
+the name, group, and tags remain editable. Source paths never select a section or
+category.
 
 **Generate Lua script** generates the Lua script in the background. Copy the `dofile`
 command from Output into the DaVinci Resolve Lua console. The output pane can be
@@ -39,8 +41,8 @@ This DrLua option is independent of PowerShell's `pwsh -NoProfile` option.
 Requires PowerShell 7, uv, Python 3.12.9, and Inno Setup 6. Supply an extracted
 Windows x64 static FFmpeg distribution containing `bin/ffprobe.exe`, `LICENSE`,
 and `README.txt`.
-The existing local `drlua/section_category_data.py` is also required and is bundled
-with its configured section/category paths; review that data before distributing.
+`drlua/section_category_data.py` is included in the repository and bundle. It
+contains only section names and category-name lists, with no paths or tag overrides.
 
 ```powershell
 pwsh -NoProfile -File scripts/build-setup.ps1 -FfmpegRoot C:\Tools\ffmpeg-7.1.1-full_build

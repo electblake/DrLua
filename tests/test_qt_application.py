@@ -29,18 +29,9 @@ def window(app, monkeypatch, tmp_path):
         catalog,
         "SECTION_CATEGORY_DATA",
         {
-            "Sections": {
-                "Test section": {
-                    "Path": str(tmp_path),
-                    "Categories": {
-                        "Test category": {
-                            "Path": str(tmp_path / "category"),
-                            "Tags": ["first", "second"],
-                        },
-                        "Other": {"Path": str(tmp_path / "other")},
-                    },
-                }
-            },
+            "Test section": ["Test category", "Other"],
+            "Second section": ["Second category"],
+            "Empty section": [],
         },
     )
     messages = []
@@ -81,27 +72,28 @@ def wait_until(predicate):
     assert predicate()
 
 
-def test_sources_suggestions_and_editable_metadata(window, tmp_path):
+def test_source_name_inference_preserves_selected_metadata(window, tmp_path):
     root, controller = window
     folder = tmp_path / "category"
     folder.mkdir()
     assert item(root, "sourcesField").hasFocus()
     assert not item(root, "generateButton").isEnabled()
+    controller.form.section = "Second section"
+    controller.form.category = "Second category"
+    controller.form.tags = "Manual tag"
     controller.form.appendUrls([QUrl.fromLocalFile(str(folder))])
     controller.form.appendUrls([QUrl.fromLocalFile(str(tmp_path / "one.mp4"))])
     wait_until(lambda: not controller.form.inferencePending)
     assert controller.form.name == "category"
-    assert controller.form.section == "Test section"
-    assert controller.form.category == "Test category"
-    assert controller.form.tags == "first\nsecond"
+    assert controller.form.section == "Second section"
+    assert controller.form.category == "Second category"
+    assert controller.form.tags == "Manual tag"
     assert item(root, "generateButton").isEnabled()
     assert [
         Path(value)
         for value in item(root, "sourcesField").toPlainText().splitlines()
     ] == [folder, tmp_path / "one.mp4"]
-    assert item(root, "categoryField").currentText() == "Test category"
-    controller.form.category = "Custom"
-    assert item(root, "tagsField").toPlainText() == "Custom"
+    assert item(root, "categoryField").currentText() == "Second category"
 
 
 def test_real_generate_button_runs_media_off_ui_thread(window, monkeypatch, tmp_path):
@@ -299,7 +291,7 @@ def test_cancel_pending_metadata_discards_result(window, monkeypatch, tmp_path):
         entered.set()
         while not QThread.currentThread().isInterruptionRequested():
             time.sleep(0.01)
-        return source, "Discard this name", ("Test section", "Test category")
+        return source, "Discard this name"
 
     monkeypatch.setattr(form_module, "source_metadata", metadata)
     controller.form.sources = str(tmp_path)
@@ -414,16 +406,18 @@ def test_keyboard_sources_and_resize(window, tmp_path):
 def test_keyboard_metadata_and_repeated_suggestions(window):
     root, controller = window
     category = item(root, "categoryField")
-    click(root, "categoryField")
-    QGuiApplication.clipboard().setText("Typed category")
-    QTest.keyClick(QApplication.focusWidget(), Qt.Key.Key_A, Qt.KeyboardModifier.ControlModifier)
-    QTest.keyClick(QApplication.focusWidget(), Qt.Key.Key_V, Qt.KeyboardModifier.ControlModifier)
-    QTest.keyClick(QApplication.focusWidget(), Qt.Key.Key_Tab)
-    assert controller.form.category == "Typed category"
-    assert controller.form.tags == "Typed category"
+    assert not category.isEditable()
+    assert not item(root, "sectionField").isEditable()
+    category.setFocus()
+    QTest.keyClick(category, Qt.Key.Key_Down)
+    assert controller.form.category == "Test category"
+    assert controller.form.tags == "Test category"
+    QTest.keyClick(category, Qt.Key.Key_Down)
+    assert controller.form.category == "Other"
+    assert controller.form.tags == "Other"
     controller.form.category = "Test category"
     assert category.currentText() == "Test category"
-    assert item(root, "tagsField").toPlainText() == "first\nsecond"
+    assert item(root, "tagsField").toPlainText() == "Test category"
     tags = item(root, "tagsField")
     tags.setFocus()
     QTest.qWait(50)
@@ -769,7 +763,7 @@ def test_pending_generation_uses_requested_source_metadata(window, monkeypatch, 
 
     def metadata(path):
         release.wait(3)
-        return path, "Original inferred name", ("Test section", "Test category")
+        return path, "Original inferred name"
 
     def generate(paths, **kwargs):
         received.append((paths, kwargs))
@@ -778,16 +772,20 @@ def test_pending_generation_uses_requested_source_metadata(window, monkeypatch, 
     monkeypatch.setattr(form_module, "source_metadata", metadata)
     monkeypatch.setattr(generation, "create_bins", generate)
     controller.form.appendUrls([QUrl.fromLocalFile(str(source))])
+    controller.form.section = "Second section"
+    controller.form.category = "Second category"
     controller.form.tags = "explicit tag"
     click(root, "generateButton")
     controller.form.sources = str(tmp_path / "next run")
     controller.form.name = "Next name"
+    controller.form.section = "Empty section"
     controller.form.tags = "Next tags"
     release.set()
     wait_until(lambda: not controller.busy)
     assert received[0][0] == [source]
     assert received[0][1]["name"] == "Original inferred name"
     assert received[0][1]["tag"] == ["explicit tag"]
+    assert received[0][1]["section"] == "Second section"
 
 
 def test_pending_generation_survives_new_source_inference(window, monkeypatch, tmp_path):
@@ -802,7 +800,7 @@ def test_pending_generation_survives_new_source_inference(window, monkeypatch, t
     def metadata(source):
         if Path(source) == original_source:
             release.wait(3)
-        return source, Path(source).name, ("Test section", "")
+        return source, Path(source).name
 
     def generate(paths, **kwargs):
         received.append((paths, kwargs["name"]))
@@ -830,7 +828,7 @@ def test_cancel_finished_metadata_before_queued_result_and_restart(window, monke
 
     def metadata(source):
         release.wait(3)
-        return source, "Discarded metadata", ("Test section", "")
+        return source, "Discarded metadata"
 
     monkeypatch.setattr(form_module, "source_metadata", metadata)
     controller.form.sources = str(sample)
@@ -1074,3 +1072,26 @@ def test_files_rename_dialog_save_and_cancel(window, monkeypatch):
     assert root.files.item(0).data(Qt.ItemDataRole.UserRole) == (directory / "renamed.lua").as_posix()
     assert threads and all(thread != QApplication.instance().thread() for thread in threads)
     assert root.files_status.text() == "Renamed file to renamed.lua."
+
+
+def test_section_changes_refresh_categories_without_worker_jobs(window):
+    root, controller = window
+    form = controller.form
+    section = item(root, "sectionField")
+    category = item(root, "categoryField")
+    assert form.categories == ["Test category", "Other"]
+    assert not form._jobs
+    category.setCurrentIndex(0)
+    assert form.tags == "Test category"
+    section.setCurrentText("Second section")
+    assert form.categories == ["Second category"]
+    assert category.count() == 1
+    assert category.currentIndex() == -1
+    assert form.category == form.tags == ""
+    category.setCurrentIndex(0)
+    assert form.tags == "Second category"
+    section.setCurrentText("Empty section")
+    assert form.categories == []
+    assert category.count() == 0
+    assert form.category == form.tags == ""
+    assert not form._jobs

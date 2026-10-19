@@ -16,11 +16,7 @@ def source_metadata(source):
     name = default_name(source)
     if QThread.currentThread().isInterruptionRequested():
         return
-    return source, name, catalog.match_section_category(source)
-
-
-def section_categories(section):
-    return section, catalog.category_options(section)
+    return source, name
 
 
 class FormModel(QObject):
@@ -43,12 +39,11 @@ class FormModel(QObject):
         self._category = ""
         self._group = ""
         self._tags = ""
-        self._categories = []
+        self._categories = catalog.category_options(self._section)
         self._jobs = []
         self._inference_source = None
         self.inferenceJob = None
         self._inferred_source = None
-        self.loadCategories()
 
     def start_job(self, job):
         self._jobs.append(job)
@@ -62,18 +57,6 @@ class FormModel(QObject):
             self._inference_source = None
             self.inferenceJob = None
         self._jobs.remove(self.sender())
-
-    def loadCategories(self):
-        job = MetadataJob(section_categories, self._section, parent=self)
-        job.resultReady.connect(self.categoriesReceived)
-        self.start_job(job)
-
-    @Slot(object)
-    def categoriesReceived(self, result):
-        section, categories = result
-        if section == self._section:
-            self._categories = categories
-            self.categoriesChanged.emit()
 
     @Property(str, notify=sourcesChanged)
     def sources(self):
@@ -113,12 +96,11 @@ class FormModel(QObject):
     def section(self, value):
         if self._section != value:
             self._section = value
-            self._categories = []
-            self.categoriesChanged.emit()
-            self.loadCategories()
-            self.sectionChanged.emit()
+            self._categories = catalog.category_options(value)
             self.category = ""
             self.tags = ""
+            self.categoriesChanged.emit()
+            self.sectionChanged.emit()
 
     @Property(str, notify=categoryChanged)
     def category(self):
@@ -129,9 +111,7 @@ class FormModel(QObject):
         if self._category != value:
             self._category = value
             self.categoryChanged.emit()
-            self.tags = "\n".join(
-                catalog.category_tags(self._section.strip(), value.strip())
-            )
+            self.tags = value.strip()
 
     @Property(str, notify=groupChanged)
     def group(self):
@@ -180,13 +160,10 @@ class FormModel(QObject):
         job = self.sender()
         if job.cancelled:
             return
-        source, name, (section, category) = result
+        source, name = result
         if job is self.inferenceJob and split_sources(self._sources)[:1] == [source]:
             if not self._name.strip():
                 self.name = name
-            if section:
-                self.section = section
-                self.category = category or ""
             self._inferred_source = source
         if self.sender() is self.inferenceJob:
             self._inference_source = None

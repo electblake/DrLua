@@ -8,7 +8,6 @@ from PySide6.QtCore import QObject, Property, QThread, QTimer, QUrl, Signal, Slo
 from PySide6.QtGui import QDesktopServices, QGuiApplication
 
 from drlua import __version__, updates
-from drlua.application import catalog
 from drlua.application.generation import split_sources
 from drlua.application.progress import Progress
 from drlua.profile import profile
@@ -160,14 +159,13 @@ class AppController(QObject):
 
     @Slot(object, object)
     def sourcePrepared(self, job, result):
-        source, name, (section, category) = result
+        source, name = result
         if self._pending_request is not None and job is self._pending_job:
             request = self._pending_request
             self._pending_request = None
             self._pending_job = None
             if not request.name:
-                request = replace(request, name=name, section=section or request.section,
-                                  tags=request.tags or tuple(catalog.category_tags(section, category)))
+                request = replace(request, name=name)
             self.startGeneration(request)
 
     def startGeneration(self, request):
