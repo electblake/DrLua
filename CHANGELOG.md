@@ -10,7 +10,7 @@ and this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 ### Added
 
 - Added Generate, Files, and Settings tabs with generated Lua command copying and a saved output directory.
-- Added recursive source selection, generation cancellation, and elapsed-time and activity reporting.
+- Added a subdirectory scanning checkbox saved and restored through QSettings, generation cancellation, and elapsed-time and activity reporting.
 - Added isolated `-NoProfile` desktop sessions with temporary storage.
 - Added a Refresh button to reload saved Lua files in the Files tab.
 
@@ -20,6 +20,13 @@ and this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 - Moved source metadata lookup and generated-file listing into background workers.
 - Reduced the source paths text area to half height and aligned its buttons with the form input column.
 - Moved the save-directory input and folder buttons from Settings above the file list in the Files tab.
+- Renamed the generation actions to Generate and Copy, with Cancel between them.
+
+### Fixed
+
+- Prevented pending metadata and delayed worker signals from leaving generation stuck or changing a subsequent run.
+- Stopped cancelled runs before starting another scan, probe, grouping, or output-writing step.
+- Discarded unfinished output on cancellation while preserving existing scripts and allowing generation to restart.
 
 ## [0.3.1] - 2026-09-19
 

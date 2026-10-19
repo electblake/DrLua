@@ -96,6 +96,8 @@ def make_include_kinds_from_args(vertical_only, full_only):
 def collect_folder_media_files(input_path: Path, recursive:bool=True, activity=None):
     if activity is not None:
         activity(f"Scanning folder: {input_path}")
+    if QThread.currentThread().isInterruptionRequested():
+        return
     input_path = Path(input_path).expanduser().resolve()
     media_files: list[Path] = []
     if recursive:
@@ -228,6 +230,8 @@ def probe_media_files_to_clips(
             activity(f"Probing file {index + 1}/{len(media_files)}: {media_file}")
         if progress is not None:
             progress("Probing media", index, len(media_files))
+        if QThread.currentThread().isInterruptionRequested():
+            return
         logger.info("Probing {}", media_file)
         process = QProcess()
         process.start(ffprobe_path, [
@@ -470,6 +474,8 @@ def create_bins(
         progress("Grouping clips", len(media_files), len(media_files))
     if activity is not None:
         activity(f"Grouping {len(clips)} clips")
+    if QThread.currentThread().isInterruptionRequested():
+        return
     output_bins = make_bin_groups(clips, release_name, include_kinds)
     if QThread.currentThread().isInterruptionRequested():
         return
@@ -488,6 +494,8 @@ def create_bins(
         progress("Writing Lua script", len(media_files), len(media_files))
     if activity is not None:
         activity(f"Writing Lua script: {out_file_path}")
+    if QThread.currentThread().isInterruptionRequested():
+        return
     header = lua_header(release_name, input_locations, out_file_path)
     out_file_path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -500,6 +508,8 @@ def create_bins(
     ]
 
     output_lua = "\n".join(output_lines)
+    if QThread.currentThread().isInterruptionRequested():
+        return
 
     with tempfile.TemporaryDirectory(prefix=".drlua-", dir=out_file_path.parent) as staging:
         staged_file = Path(staging) / out_file_path.name
