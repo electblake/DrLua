@@ -2,7 +2,7 @@
   <img src="assets/Dr-Lua-color.png" alt="Dr. Lua" width="640" style="max-width: 640px; width: 100%; height: auto;">
 </p>
 
-<h1 align="center">DrLua v0.5.4</h1>
+<h1 align="center">DrLua v0.5.5</h1>
 
 <p align="center">Create and manage Lua scripts for DaVinci Resolve.</p>
 
