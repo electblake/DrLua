@@ -15,6 +15,5 @@ description = "Build the Qt Widgets app and Windows installer (pass -FfmpegRoot)
 run = "pwsh -NoProfile -File scripts/build-setup.ps1"
 
 [tasks.release]
-description = "Compile DrLua and publish the current version to GitHub"
-depends = ["compile"]
+description = "Build the Windows installer and publish to GitHub (pass -FfmpegRoot)"
 run_windows = "pwsh -NoProfile -File scripts/release.ps1"

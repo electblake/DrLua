@@ -26,6 +26,7 @@ and this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ### Fixed
 
+- Fixed the release task to build and publish the Windows installer with versioned changelog notes.
 - Prevented pending metadata and delayed worker signals from leaving generation stuck or changing a subsequent run.
 - Stopped cancelled runs before starting another scan, probe, grouping, or output-writing step.
 - Discarded unfinished output on cancellation while preserving existing scripts and allowing generation to restart.
