@@ -1,4 +1,4 @@
-# drlua v0.3.1
+# drlua v0.4.0
 
 Creates DaVinci Resolve Lua scripts and helps manage generated .lua files.
 

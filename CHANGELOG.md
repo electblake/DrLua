@@ -7,6 +7,8 @@ and this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-10-18
+
 ### Added
 
 - Added Generate, Files, and Settings tabs with generated Lua command copying and a saved output directory.
@@ -84,7 +86,8 @@ and this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 - Import media from folders, Everything file lists, metadata CSV files, and Stash exports.
 - Provide an interactive Windows launcher, generated Lua file management, and Windows Explorer context menu integration.
 
-[Unreleased]: https://github.com/electblake/DrLua/compare/v0.3.1...HEAD
+[Unreleased]: https://github.com/electblake/DrLua/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/electblake/DrLua/compare/v0.3.1...v0.4.0
 [0.3.1]: https://github.com/electblake/DrLua/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/electblake/DrLua/compare/v0.2.3...v0.3.0
 [0.2.3]: https://github.com/electblake/DrLua/compare/v0.2.2...v0.2.3
