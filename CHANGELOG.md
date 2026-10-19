@@ -7,6 +7,8 @@ and this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ## [Unreleased]
 
+## [0.5.6] - 2026-10-19
+
 ### Added
 
 - Added a Software Update dialog with version details, download progress, and a Quit and Install action.
@@ -161,7 +163,8 @@ and this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 - Import media from folders, Everything file lists, metadata CSV files, and Stash exports.
 - Provide an interactive Windows launcher, generated Lua file management, and Windows Explorer context menu integration.
 
-[Unreleased]: https://github.com/electblake/DrLua/compare/v0.5.5...HEAD
+[Unreleased]: https://github.com/electblake/DrLua/compare/v0.5.6...HEAD
+[0.5.6]: https://github.com/electblake/DrLua/compare/v0.5.5...v0.5.6
 [0.5.5]: https://github.com/electblake/DrLua/compare/v0.5.4...v0.5.5
 [0.5.4]: https://github.com/electblake/DrLua/compare/v0.5.3...v0.5.4
 [0.5.3]: https://github.com/electblake/DrLua/compare/v0.5.2...v0.5.3
