@@ -46,6 +46,32 @@ class FilesJob(QThread):
         self.resultReady.emit(self.directory, paths)
 
 
+class DeleteFilesJob(QThread):
+    resultReady = Signal(object)
+
+    def __init__(self, paths, parent=None):
+        super().__init__(parent)
+        self.paths = paths
+
+    def run(self):
+        for path in self.paths:
+            path.unlink()
+        self.resultReady.emit(self.paths)
+
+
+class RenameFileJob(QThread):
+    resultReady = Signal(object)
+
+    def __init__(self, path, filename, parent=None):
+        super().__init__(parent)
+        self.path = path
+        self.filename = filename
+
+    def run(self):
+        path = self.path.rename(self.path.with_name(self.filename))
+        self.resultReady.emit(path)
+
+
 class GenerationJob(QThread):
     progress = Signal(str, int, int, float)
     resultReady = Signal(object)

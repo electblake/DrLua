@@ -13,7 +13,7 @@ from drlua.application.generation import split_sources
 from drlua.application.progress import Progress
 from drlua.profile import profile
 from drlua.ui.form import FormModel
-from drlua.ui.jobs import FilesJob, GenerationJob, UpdateJob
+from drlua.ui.jobs import DeleteFilesJob, FilesJob, GenerationJob, RenameFileJob, UpdateJob
 
 
 class AppController(QObject):
@@ -27,6 +27,8 @@ class AppController(QObject):
     logReceived = Signal(str)
     saveDirectoryChanged = Signal()
     filesListed = Signal(object, object)
+    filesDeleted = Signal(object)
+    fileRenamed = Signal(object)
     generatedCommandChanged = Signal()
     exceptionReceived = Signal(object, str)
 
@@ -292,6 +294,18 @@ class AppController(QObject):
     def listFiles(self):
         job = FilesJob(self.profile.save_directory, self)
         job.resultReady.connect(self.filesListed)
+        self.start_job(job)
+
+    @Slot(object)
+    def deleteFiles(self, paths):
+        job = DeleteFilesJob(paths, self)
+        job.resultReady.connect(self.filesDeleted)
+        self.start_job(job)
+
+    @Slot(object, str)
+    def renameFile(self, path, filename):
+        job = RenameFileJob(path, filename, self)
+        job.resultReady.connect(self.fileRenamed)
         self.start_job(job)
 
     @Property(str, notify=saveDirectoryChanged)

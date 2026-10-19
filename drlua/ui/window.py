@@ -1,10 +1,12 @@
 """Desktop presentation using unmodified Qt Widgets and platform defaults."""
 
+from pathlib import Path
+
 from PySide6.QtCore import QEvent, QSignalBlocker, QUrl, Qt
-from PySide6.QtGui import QKeySequence, QTextCursor
+from PySide6.QtGui import QAction, QContextMenuEvent, QKeySequence, QTextCursor
 from PySide6.QtWidgets import (
     QAbstractItemView, QApplication, QCheckBox, QComboBox, QDialog, QDialogButtonBox, QFileDialog, QFormLayout,
-    QHBoxLayout, QLabel, QLineEdit, QMainWindow, QMessageBox, QPlainTextEdit,
+    QHBoxLayout, QLabel, QLineEdit, QMainWindow, QMenu, QMessageBox, QPlainTextEdit,
     QListWidget, QListWidgetItem, QProgressBar, QPushButton, QScrollArea, QSplitter, QTabWidget,
     QVBoxLayout, QWidget,
 )
@@ -18,6 +20,22 @@ class SourceEditor(QPlainTextEdit):
             self.insertPlainText("\n".join(url.toLocalFile() for url in source.urls()))
         else:
             super().insertFromMimeData(source)
+
+
+class SavedFilesList(QListWidget):
+    def contextMenuEvent(self, event):
+        if event.reason() == QContextMenuEvent.Reason.Keyboard:
+            item = self.currentItem()
+        else:
+            item = self.itemAt(event.pos())
+        if item is None or item.isHidden():
+            return
+        if not item.isSelected():
+            self.setCurrentItem(item)
+        position = event.globalPos()
+        if event.reason() == QContextMenuEvent.Reason.Keyboard:
+            position = self.viewport().mapToGlobal(self.visualItemRect(item).center())
+        self.context_menu.popup(position)
 
 
 class MainWindow(QMainWindow):
@@ -49,6 +67,8 @@ class MainWindow(QMainWindow):
         controller.updateAvailable.connect(self.offer_update)
         controller.installReady.connect(self.close)
         controller.filesListed.connect(self.show_files)
+        controller.filesDeleted.connect(self.files_deleted)
+        controller.fileRenamed.connect(self.file_renamed)
         controller.saveDirectoryChanged.connect(self.refresh_files)
         controller.busyChanged.connect(self.refresh_files)
         self.tabs.currentChanged.connect(self.refresh_files)
@@ -195,9 +215,29 @@ class MainWindow(QMainWindow):
         self.file_search.setClearButtonEnabled(True)
         self.file_search.textChanged.connect(self.filter_files)
         layout.addWidget(self.file_search)
-        self.files = QListWidget(objectName="savedFilesList")
+        self.files = SavedFilesList(objectName="savedFilesList")
         self.files.setAccessibleName("Saved Lua files")
         self.files.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
+        self.copy_file_action = QAction("&Copy command", self.files)
+        self.copy_file_action.setShortcut(QKeySequence.StandardKey.Copy)
+        self.copy_file_action.setShortcutContext(Qt.ShortcutContext.WidgetShortcut)
+        self.copy_file_action.triggered.connect(self.copy_file_commands)
+        self.delete_file_action = QAction("&Delete file…", self.files)
+        self.delete_file_action.setShortcut(QKeySequence.StandardKey.Delete)
+        self.delete_file_action.setShortcutContext(Qt.ShortcutContext.WidgetShortcut)
+        self.delete_file_action.triggered.connect(self.delete_file_commands)
+        self.rename_file_action = QAction("&Rename file…", self.files)
+        self.rename_file_action.setShortcut(QKeySequence(Qt.Key.Key_F2))
+        self.rename_file_action.setShortcutContext(Qt.ShortcutContext.WidgetShortcut)
+        self.rename_file_action.triggered.connect(self.rename_file)
+        self.files.addActions([self.copy_file_action, self.rename_file_action, self.delete_file_action])
+        self.files.context_menu = QMenu(self.files)
+        self.files.context_menu.addAction(self.copy_file_action)
+        self.files.context_menu.addAction(self.rename_file_action)
+        self.files.context_menu.addSeparator()
+        self.files.context_menu.addAction(self.delete_file_action)
+        self.files.itemSelectionChanged.connect(self.refresh_file_actions)
+        self.refresh_file_actions()
         layout.addWidget(self.files)
         self.copy_commands = QPushButton("&Copy selected commands", objectName="copySelectedCommandsButton")
         self.copy_commands.setEnabled(False)
@@ -209,6 +249,56 @@ class MainWindow(QMainWindow):
         self.files_status = QLabel(objectName="filesStatusLabel")
         self.files_status.setWordWrap(True)
         layout.addWidget(self.files_status)
+
+    def refresh_file_actions(self):
+        selected = self.files.selectedItems()
+        self.copy_file_action.setEnabled(bool(selected))
+        self.delete_file_action.setEnabled(bool(selected))
+        self.rename_file_action.setEnabled(len(selected) == 1)
+        self.copy_file_action.setText("&Copy command" if len(selected) == 1 else "&Copy commands")
+        self.delete_file_action.setText("&Delete file…" if len(selected) == 1 else "&Delete files…")
+
+    def rename_file(self):
+        path = Path(self.files.selectedItems()[0].data(Qt.ItemDataRole.UserRole))
+        self.rename_dialog = QDialog(self, objectName="renameFileDialog")
+        self.rename_dialog.setWindowTitle("Rename file")
+        layout = QFormLayout(self.rename_dialog)
+        filename = QLineEdit(path.name, objectName="renameFilenameField")
+        layout.addRow("&Filename:", filename)
+        buttons = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Save | QDialogButtonBox.StandardButton.Cancel
+        )
+        buttons.accepted.connect(self.rename_dialog.accept)
+        buttons.rejected.connect(self.rename_dialog.reject)
+        self.rename_dialog.accepted.connect(lambda: self.controller.renameFile(path, filename.text()))
+        layout.addRow(buttons)
+        self.rename_dialog.open()
+        filename.setFocus()
+        filename.setSelection(0, len(path.stem))
+
+    def file_renamed(self, path):
+        self.refresh_files()
+        self.files_status.setText(f"Renamed file to {path.name}.")
+
+    def delete_file_commands(self):
+        paths = [Path(item.data(Qt.ItemDataRole.UserRole)) for item in self.files.selectedItems()]
+        self.delete_prompt = QMessageBox(self)
+        self.delete_prompt.setWindowTitle("Delete saved Lua files")
+        self.delete_prompt.setIcon(QMessageBox.Icon.Warning)
+        self.delete_prompt.setText("Permanently delete these saved Lua files?\n\n" + "\n".join(path.name for path in paths))
+        self.delete_prompt.setInformativeText("This cannot be undone. Source media will not be deleted.")
+        delete = self.delete_prompt.addButton("Delete", QMessageBox.ButtonRole.DestructiveRole)
+        cancel = self.delete_prompt.addButton(QMessageBox.StandardButton.Cancel)
+        self.delete_prompt.setDefaultButton(cancel)
+        self.delete_prompt.setEscapeButton(cancel)
+        self.delete_prompt.buttonClicked.connect(
+            lambda button: self.controller.deleteFiles(paths) if button is delete else None
+        )
+        self.delete_prompt.open()
+
+    def files_deleted(self, paths):
+        self.refresh_files()
+        self.files_status.setText(f"Deleted {len(paths)} saved Lua file(s).")
 
     def refresh_files(self):
         if self.tabs.currentWidget() is self.files_page and not self.controller.busy:

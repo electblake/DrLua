@@ -961,3 +961,116 @@ def test_cleared_name_is_inferred_again_for_same_source(window, monkeypatch, tmp
     click(root, "generateButton")
     wait_until(lambda: not controller.busy)
     assert received == [tmp_path.name]
+
+
+def test_files_context_menu_copy_and_delete(window, monkeypatch):
+    from PySide6.QtGui import QContextMenuEvent
+    from PySide6.QtWidgets import QMessageBox
+
+    root, controller = window
+    directory = controller.profile.save_directory
+    directory.mkdir()
+    first = directory / "first.lua"
+    second = directory / "second.lua"
+    first.write_text("return 1")
+    second.write_text("return 2")
+    root.tabs.setCurrentWidget(root.files_page)
+    wait_until(lambda: root.files.count() == 2)
+    root.files.setCurrentRow(0)
+    target = root.files.item(1)
+    point = root.files.visualItemRect(target).center()
+    QApplication.sendEvent(root.files.viewport(), QContextMenuEvent(
+        QContextMenuEvent.Reason.Mouse, point, root.files.viewport().mapToGlobal(point)
+    ))
+    menu = root.files.context_menu
+    assert menu.isVisible()
+    assert root.files.selectedItems() == [target]
+    QTest.mouseClick(menu, Qt.MouseButton.LeftButton,
+                     pos=menu.actionGeometry(root.copy_file_action).center())
+    assert QApplication.clipboard().text() == f"dofile([[{second.as_posix()}]])"
+    root.files.setFocus()
+    QApplication.sendEvent(root.files, QContextMenuEvent(
+        QContextMenuEvent.Reason.Keyboard, QPoint(), root.files.mapToGlobal(QPoint())
+    ))
+    assert menu.isVisible()
+    QTest.keyClick(menu, Qt.Key.Key_Down)
+    QTest.keyClick(menu, Qt.Key.Key_Down)
+    QTest.keyClick(menu, Qt.Key.Key_Down)
+    QTest.keyClick(menu, Qt.Key.Key_Return)
+    assert root.delete_prompt.isVisible()
+    assert root.delete_prompt.defaultButton() == root.delete_prompt.button(QMessageBox.StandardButton.Cancel)
+    QTest.keyClick(root.delete_prompt, Qt.Key.Key_Escape)
+    assert second.exists()
+    threads = []
+    unlink = Path.unlink
+
+    def remove(path):
+        threads.append(QThread.currentThread())
+        unlink(path)
+
+    monkeypatch.setattr(Path, "unlink", remove)
+    root.files.setFocus()
+    QTest.keyClick(root.files, Qt.Key.Key_Delete)
+    assert root.delete_prompt.isVisible()
+    delete = next(button for button in root.delete_prompt.buttons()
+                  if root.delete_prompt.buttonRole(button) == QMessageBox.ButtonRole.DestructiveRole)
+    QTest.mouseClick(delete, Qt.MouseButton.LeftButton)
+    wait_until(lambda: root.files.count() == 1 and not controller._jobs)
+    assert not second.exists()
+    assert first.exists()
+    assert root.files.item(0).text() == first.name
+    assert threads and all(thread != QApplication.instance().thread() for thread in threads)
+    assert root.files_status.text() == "Deleted 1 saved Lua file(s)."
+
+
+def test_files_rename_dialog_save_and_cancel(window, monkeypatch):
+    from PySide6.QtGui import QContextMenuEvent
+    from PySide6.QtWidgets import QDialogButtonBox
+
+    root, controller = window
+    directory = controller.profile.save_directory
+    directory.mkdir()
+    original = directory / "original.lua"
+    original.write_text("return 42")
+    root.tabs.setCurrentWidget(root.files_page)
+    wait_until(lambda: root.files.count() == 1)
+    assert not root.rename_file_action.isEnabled()
+    point = root.files.visualItemRect(root.files.item(0)).center()
+    QApplication.sendEvent(root.files.viewport(), QContextMenuEvent(
+        QContextMenuEvent.Reason.Mouse, point, root.files.viewport().mapToGlobal(point)
+    ))
+    menu = root.files.context_menu
+    QTest.mouseClick(menu, Qt.MouseButton.LeftButton,
+                     pos=menu.actionGeometry(root.rename_file_action).center())
+    assert root.rename_dialog.isVisible()
+    filename = item(root.rename_dialog, "renameFilenameField")
+    assert filename.text() == "original.lua"
+    assert filename.selectedText() == "original"
+    filename.setText("cancelled.lua")
+    buttons = root.rename_dialog.findChild(QDialogButtonBox)
+    QTest.mouseClick(buttons.button(QDialogButtonBox.StandardButton.Cancel), Qt.MouseButton.LeftButton)
+    assert original.exists()
+    assert not (directory / "cancelled.lua").exists()
+    root.files.setFocus()
+    QTest.keyClick(root.files, Qt.Key.Key_F2)
+    assert root.rename_dialog.isVisible()
+    filename = item(root.rename_dialog, "renameFilenameField")
+    assert filename.text() == "original.lua"
+    filename.setText("renamed.lua")
+    threads = []
+    rename = Path.rename
+
+    def rename_on_disk(path, target):
+        threads.append(QThread.currentThread())
+        return rename(path, target)
+
+    monkeypatch.setattr(Path, "rename", rename_on_disk)
+    buttons = root.rename_dialog.findChild(QDialogButtonBox)
+    QTest.mouseClick(buttons.button(QDialogButtonBox.StandardButton.Save), Qt.MouseButton.LeftButton)
+    wait_until(lambda: not controller._jobs and root.files.count() == 1
+               and root.files.item(0).text() == "renamed.lua")
+    assert not original.exists()
+    assert (directory / "renamed.lua").read_text() == "return 42"
+    assert root.files.item(0).data(Qt.ItemDataRole.UserRole) == (directory / "renamed.lua").as_posix()
+    assert threads and all(thread != QApplication.instance().thread() for thread in threads)
+    assert root.files_status.text() == "Renamed file to renamed.lua."

@@ -9,6 +9,8 @@ and this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ### Added
 
+- Added a native file-list context menu to copy Lua commands, rename a file, and delete selected files, with keyboard shortcuts.
+- Added a rename dialog with the current filename and Save and Cancel buttons, plus confirmation before deleting saved files.
 - Added a Search Files field with live, case-insensitive filename filtering in the Files tab.
 
 ## [0.4.0] - 2026-10-18
