@@ -6,12 +6,13 @@ from PySide6.QtCore import QEvent, QSignalBlocker, QUrl, Qt
 from PySide6.QtGui import QAction, QContextMenuEvent, QKeySequence, QTextCursor
 from PySide6.QtWidgets import (
     QAbstractItemView, QApplication, QCheckBox, QComboBox, QDialog, QDialogButtonBox, QFileDialog, QFormLayout,
-    QHBoxLayout, QLabel, QLineEdit, QMainWindow, QMenu, QMessageBox, QPlainTextEdit,
+    QGroupBox, QHBoxLayout, QLabel, QLineEdit, QMainWindow, QMenu, QMessageBox, QPlainTextEdit,
     QListWidget, QListWidgetItem, QProgressBar, QPushButton, QScrollArea, QSplitter, QTabWidget,
     QVBoxLayout, QWidget,
 )
 
 from drlua.ui.controller import AppController
+from drlua.integrations import APP_NAME
 
 
 class SourceEditor(QPlainTextEdit):
@@ -50,12 +51,15 @@ class MainWindow(QMainWindow):
         self.generate_page = QWidget(objectName="generatePage")
         self.files_page = QWidget(objectName="filesPage")
         self.settings_page = QWidget(objectName="settingsPage")
+        self.extras_page = QWidget(objectName="extrasPage")
         self.tabs.addTab(self.generate_page, "&Generate")
         self.tabs.addTab(self.files_page, "&Files")
         self.tabs.addTab(self.settings_page, "&Settings")
+        self.tabs.addTab(self.extras_page, "E&xtras")
         self.build_generation()
         self.build_files()
         self.build_settings()
+        self.build_extras()
         self.build_menus()
         self.build_dialogs()
         controller.busyChanged.connect(self.refresh_actions)
@@ -89,6 +93,7 @@ class MainWindow(QMainWindow):
         fields_layout.setRowWrapPolicy(QFormLayout.RowWrapPolicy.WrapLongRows)
         fields_layout.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.AllNonFixedFieldsGrow)
         self.sources = SourceEditor(objectName="sourcesField")
+        self.sources.setPlainText(form.sources)
         self.sources.setFixedHeight(self.sources.sizeHint().height() // 2)
         self.sources.setAccessibleName("Source paths")
         self.sources.setPlaceholderText("One path per line, or separate paths with |.")
@@ -357,6 +362,25 @@ class MainWindow(QMainWindow):
             notice.setWordWrap(True)
             layout.addRow(notice)
 
+    def build_extras(self):
+        layout = QVBoxLayout(self.extras_page)
+        explorer = QGroupBox("File Explorer")
+        form = QVBoxLayout(explorer)
+        hint = QLabel(
+            f"Add Open in {APP_NAME} to right-click menus "
+            "for folders, folder backgrounds, and drives."
+        )
+        hint.setWordWrap(True)
+        form.addWidget(hint)
+        self.install_explorer = QPushButton("Install in File Explorer", objectName="installExplorerButton")
+        self.install_explorer.clicked.connect(self.controller.installExplorer)
+        form.addWidget(self.install_explorer, alignment=Qt.AlignmentFlag.AlignLeft)
+        layout.addWidget(explorer)
+        self.explorer_status = QLabel(objectName="explorerStatusLabel")
+        self.explorer_status.setWordWrap(True)
+        layout.addWidget(self.explorer_status)
+        layout.addStretch()
+
     def build_menus(self):
         file_menu = self.menuBar().addMenu("&File")
         file_menu.setObjectName("fileMenu")
@@ -407,9 +431,11 @@ class MainWindow(QMainWindow):
         self.cancel_button.setEnabled(self.controller.canCancel)
         self.copy_lua.setEnabled(bool(self.controller.generatedCommand))
         self.check_updates.setEnabled(not self.controller.busy)
+        self.install_explorer.setEnabled(not self.controller.busy)
 
     def refresh_status(self):
         self.status.setText(self.controller.status)
+        self.explorer_status.setText(self.controller.status)
 
     def refresh_progress(self):
         self.progress.setRange(0, self.controller.progressMaximum)

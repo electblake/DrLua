@@ -1,10 +1,19 @@
 from types import SimpleNamespace
 from unittest.mock import Mock
 
+import pytest
+from PySide6.QtWidgets import QApplication
+
 from drlua.ui import application
 
 
-def test_installer_launch_follows_ui_shutdown_workers_and_mutex(monkeypatch, tmp_path):
+@pytest.fixture(scope="session")
+def qt_app():
+    return QApplication.instance() or QApplication([])
+
+
+def test_installer_launch_follows_ui_shutdown_workers_and_mutex(monkeypatch, tmp_path, qt_app):
+    monkeypatch.setattr(application.sys, "argv", ["drlua"])
     events = []
     setup = tmp_path / "DrLua-99.0.0-windows-amd64-Setup.exe"
     controller = SimpleNamespace(
@@ -35,3 +44,34 @@ def test_installer_launch_follows_ui_shutdown_workers_and_mutex(monkeypatch, tmp
     monkeypatch.setattr(application.QDesktopServices, "openUrl", launch)
     assert application.run_application() == 0
     assert events[-1] == "installer launched"
+
+
+def test_explorer_directory_populates_form_before_window(monkeypatch, tmp_path, qt_app):
+    from drlua.profile import Profile
+    from drlua.ui.controller import AppController
+    from drlua.ui.window import MainWindow
+
+    app = qt_app
+    folder = str(tmp_path / "Selected folder with spaces")
+    monkeypatch.setattr(application.sys, "argv", ["drlua", folder])
+    controller = AppController(user_profile=Profile(no_profile=True))
+    monkeypatch.setattr(application, "AppController", lambda: controller)
+    monkeypatch.setattr(application, "QApplication", lambda args: app)
+    windows = []
+
+    def window(controller):
+        root = MainWindow(controller)
+        windows.append(root)
+        assert root.sources.toPlainText() == folder
+        assert controller.form.sources == folder
+        assert not controller.busy
+        assert not controller._jobs
+        assert not controller.generatedCommand
+        return root
+
+    monkeypatch.setattr(application, "MainWindow", window)
+    monkeypatch.setattr(app, "exec", lambda: 0)
+    assert application.run_application() == 0
+    app.aboutToQuit.disconnect(controller.shutdown)
+    controller.shutdown()
+    windows[0].close()

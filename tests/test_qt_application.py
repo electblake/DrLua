@@ -72,6 +72,40 @@ def wait_until(predicate):
     assert predicate()
 
 
+def test_explorer_install_button_runs_worker_and_reports_success_after_result(window, monkeypatch, tmp_path):
+    from drlua import integrations
+
+    root, controller = window
+    entered = threading.Event()
+    release = threading.Event()
+    threads = []
+
+    def install():
+        threads.append(QThread.currentThread())
+        entered.set()
+        release.wait(3)
+        return 0
+
+    monkeypatch.setattr(integrations, "install", install)
+    controller.form.sources = str(tmp_path)
+    root.tabs.setCurrentWidget(root.extras_page)
+    click(root, "installExplorerButton")
+    wait_until(entered.is_set)
+    assert controller.busy
+    assert controller.status == "Installing in File Explorer…"
+    assert not root.install_explorer.isEnabled()
+    assert not root.generate_button.isEnabled()
+    assert not root.check_updates.isEnabled()
+    assert not root.cancel_button.isEnabled()
+    assert threads[0] != QApplication.instance().thread()
+    release.set()
+    wait_until(lambda: not controller.busy)
+    assert controller.status == "Installed in File Explorer"
+    assert root.install_explorer.isEnabled()
+    assert root.generate_button.isEnabled()
+    assert root.check_updates.isEnabled()
+
+
 def test_source_name_inference_preserves_selected_metadata(window, tmp_path):
     root, controller = window
     folder = tmp_path / "category"
@@ -117,12 +151,14 @@ def test_real_generate_button_runs_media_off_ui_thread(window, monkeypatch, tmp_
     assert not item(root, "generateButton").isEnabled()
     assert not item(root, "copyLuaCommandButton").isEnabled()
     assert not item(root, "checkUpdatesButton").isEnabled()
+    assert not item(root, "installExplorerButton").isEnabled()
     wait_until(lambda: not controller.busy)
     assert threads[0] != QGuiApplication.instance().thread()
     assert any("Probing media:" in status for status in statuses)
     assert "Lua script created:" in controller.status
     assert controller.progressValue == controller.progressMaximum
     assert item(root, "generateButton").isEnabled()
+    assert item(root, "installExplorerButton").isEnabled()
     generated = list((tmp_path / "output").glob("*.lua"))
     assert len(generated) == 1
     assert "CreateBins(" in generated[0].read_text(encoding="utf-8")
@@ -526,7 +562,7 @@ def test_tabs_move_with_their_pages_and_keyboard_navigation(window):
     root, controller = window
     root.tabs.setCurrentWidget(root.settings_page)
     bar = root.tabs.tabBar()
-    assert root.tabs.count() == 3
+    assert root.tabs.count() == 4
     start = bar.tabRect(2).center()
     finish = bar.tabRect(0).center()
     QTest.mousePress(bar, Qt.MouseButton.LeftButton, pos=start)

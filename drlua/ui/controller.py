@@ -7,7 +7,7 @@ from loguru import logger
 from PySide6.QtCore import QObject, Property, QThread, QTimer, QUrl, Signal, Slot, Qt
 from PySide6.QtGui import QDesktopServices, QGuiApplication
 
-from drlua import __version__, updates
+from drlua import __version__, integrations, updates
 from drlua.application.generation import split_sources
 from drlua.application.progress import Progress
 from drlua.profile import profile
@@ -314,6 +314,21 @@ class AppController(QObject):
     def saveDirectory(self, directory):
         self.profile.set_save_directory(directory)
         self.saveDirectoryChanged.emit()
+
+    @Slot()
+    def installExplorer(self):
+        self.set_busy(True)
+        self.set_status("Installing in File Explorer…")
+        job = UpdateJob(integrations.install, parent=self)
+        self._active_job = job
+        job.resultReady.connect(self.explorerInstalled)
+        self.start_job(job)
+
+    @Slot(object)
+    def explorerInstalled(self, result):
+        self._active_job = None
+        self.set_status("Installed in File Explorer")
+        self.set_busy(False)
 
     @Slot()
     def checkUpdates(self):

@@ -12,7 +12,7 @@ qt_root = Path(distribution("PySide6-Essentials").locate_file("PySide6"))
 # Resolve native dependencies from this Qt distribution and Windows, not unrelated PATH tools.
 os.environ["PATH"] = os.pathsep.join((str(qt_root), str(Path(os.environ["SystemRoot"]) / "System32")))
 data = [
-    (str(root / "assets/DrLua-app-icon.ico"), "assets"),
+    (str(root / "drlua/DrLua-app-icon.ico"), "."),
     (str(root / "drlua/lua"), "drlua/lua"),
     (str(root / "drlua/fusion"), "drlua/fusion"),
     (str(root / "build/vendor/ffprobe.exe"), "tools/ffmpeg"),
@@ -29,5 +29,5 @@ for name in ("loguru", "platformdirs", "luadata", "colorama", "PySide6", "PySide
 gui = Analysis([str(root / "drlua/gui.py")], pathex=[str(root)], datas=data,
                excludes=["tkinter", "_tkinter"])
 gui_exe = EXE(PYZ(gui.pure), gui.scripts, [], exclude_binaries=True,
-              name="DrLua", console=False, upx=False, icon=str(root / "assets/DrLua-app-icon.ico"))
+              name="DrLua", console=False, upx=False, icon=str(root / "drlua/DrLua-app-icon.ico"))
 COLLECT(gui_exe, gui.binaries, gui.datas, name=artifact, upx=False)
