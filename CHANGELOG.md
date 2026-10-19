@@ -7,15 +7,19 @@ and this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-10-18
+
 ### Added
 
 - Added a native file-list context menu to copy Lua commands, rename a file, and delete selected files, with keyboard shortcuts.
 - Added a rename dialog with the current filename and Save and Cancel buttons, plus confirmation before deleting saved files.
 - Added a Search Files field with live, case-insensitive filename filtering in the Files tab.
+- Added color and blue DrLua logo variants.
 
 ### Changed
 
 - Centered the README header with the DrLua image capped at 640px, app name and version, and a single tagline.
+- Kept file controls, settings, file refresh, and available Lua command copying enabled during background operations.
 
 ## [0.4.0] - 2026-10-18
 
@@ -97,7 +101,8 @@ and this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 - Import media from folders, Everything file lists, metadata CSV files, and Stash exports.
 - Provide an interactive Windows launcher, generated Lua file management, and Windows Explorer context menu integration.
 
-[Unreleased]: https://github.com/electblake/DrLua/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/electblake/DrLua/compare/v0.5.0...HEAD
+[0.5.0]: https://github.com/electblake/DrLua/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/electblake/DrLua/compare/v0.3.1...v0.4.0
 [0.3.1]: https://github.com/electblake/DrLua/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/electblake/DrLua/compare/v0.2.3...v0.3.0

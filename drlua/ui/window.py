@@ -301,7 +301,7 @@ class MainWindow(QMainWindow):
         self.files_status.setText(f"Deleted {len(paths)} saved Lua file(s).")
 
     def refresh_files(self):
-        if self.tabs.currentWidget() is self.files_page and not self.controller.busy:
+        if self.tabs.currentWidget() is self.files_page:
             self.files_status.clear()
             self.files.clear()
             self.controller.listFiles()
@@ -407,10 +407,8 @@ class MainWindow(QMainWindow):
     def refresh_actions(self):
         self.generate_button.setEnabled(self.controller.canGenerate)
         self.cancel_button.setEnabled(self.controller.canCancel)
-        self.copy_lua.setEnabled(bool(self.controller.generatedCommand) and not self.controller.busy)
+        self.copy_lua.setEnabled(bool(self.controller.generatedCommand))
         self.check_updates.setEnabled(not self.controller.busy)
-        self.settings_page.setEnabled(not self.controller.busy)
-        self.file_controls.setEnabled(not self.controller.busy)
 
     def refresh_status(self):
         self.status.setText(self.controller.status)
