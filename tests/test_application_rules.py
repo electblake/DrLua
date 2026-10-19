@@ -9,6 +9,8 @@ from drlua.application.progress import Progress
 def test_text_parsing():
     assert split_sources(" a | b\r\nc \n") == ["a", "b", "c"]
     assert split_tags(" a, b\nc,, ") == ["a", "b", "c"]
+    assert split_sources("file:///M:/X3/Folder%20%23Tag/video") == ["M:/X3/Folder #Tag/video"]
+    assert split_sources("M:/X3/Literal%23/video") == ["M:/X3/Literal%23/video"]
 
 
 def test_progress_rate_eta_and_finalization():

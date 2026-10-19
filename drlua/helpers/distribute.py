@@ -1,4 +1,5 @@
 from typing import Iterable, NamedTuple
+from PySide6.QtCore import QThread
 
 
 class VideoItem(NamedTuple):
@@ -9,12 +10,14 @@ class VideoItem(NamedTuple):
 def split_videos_by_frame_count(
     videos: Iterable[VideoItem],
     group_count: int = 3,
-) -> list[list[VideoItem]]:
+) -> list[list[VideoItem]] | None:
     groups: list[list[VideoItem]] = [[] for _ in range(group_count)]
     totals = [0] * group_count
 
     # largest first gives better balance
     for video in sorted(videos, key=lambda v: v.frame_length, reverse=True):
+        if QThread.currentThread().isInterruptionRequested():
+            return
         group_index = min(range(group_count), key=lambda i: totals[i])
         groups[group_index].append(video)
         totals[group_index] += video.frame_length

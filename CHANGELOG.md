@@ -7,6 +7,20 @@ and this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ## [Unreleased]
 
+### Added
+
+- Added Generate, Files, and Settings tabs with generated Lua command copying and a saved output directory.
+- Added recursive source selection, generation cancellation, and elapsed-time and activity reporting.
+- Added isolated `-NoProfile` desktop sessions with temporary storage.
+- Added a Refresh button to reload saved Lua files in the Files tab.
+
+### Changed
+
+- Replaced Qt Quick screens with native Qt Widgets and platform-default styling.
+- Moved source metadata lookup and generated-file listing into background workers.
+- Reduced the source paths text area to half height and aligned its buttons with the form input column.
+- Moved the save-directory input and folder buttons from Settings above the file list in the Files tab.
+
 ## [0.3.1] - 2026-09-19
 
 ### Changed

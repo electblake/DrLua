@@ -23,7 +23,7 @@ include = ["drlua*"]
 namespaces = true
 
 [tool.setuptools.package-data]
-drlua = ["lua/*.lua", "fusion/*.setting", "ui/qml/*.qml"]
+drlua = ["lua/*.lua", "fusion/*.setting"]
 
 [dependency-groups]
 dev = [

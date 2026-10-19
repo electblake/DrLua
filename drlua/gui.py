@@ -1,4 +1,4 @@
-"""Desktop entry point for the DrLua Qt Quick application."""
+"""Desktop entry point for the DrLua Qt Widgets application."""
 
 from drlua.ui.application import run_application
 

@@ -1,40 +1,37 @@
-"""Qt Quick application composition and desktop lifecycle."""
+"""Qt Widgets application composition and desktop lifecycle."""
 
-from pathlib import Path
+import sys
 
 from PySide6.QtCore import QUrl
-from PySide6.QtGui import QDesktopServices, QFont, QGuiApplication
-from PySide6.QtQml import QQmlApplicationEngine
-from PySide6.QtQuickControls2 import QQuickStyle
+from PySide6.QtGui import QDesktopServices
+from PySide6.QtWidgets import QApplication
 
 from drlua import __version__
 from drlua.ui.controller import AppController
 from drlua.ui.desktop import ApplicationMutex
-
-
-def create_engine(controller: AppController) -> QQmlApplicationEngine:
-    engine = QQmlApplicationEngine()
-    engine.setInitialProperties({"controller": controller})
-    engine.load(QUrl.fromLocalFile(str(Path(__file__).parent / "qml" / "Main.qml")))
-    controller.installReady.connect(engine.rootObjects()[0].close)
-    return engine
+from drlua.ui.window import MainWindow
 
 
 def run_application() -> int:
-    app = QGuiApplication([])
+    app = QApplication([])
     app.setApplicationName("DrLua")
     app.setApplicationVersion(__version__)
     app.setOrganizationName("DrLua")
-    font = QFont("Segoe UI")
-    font.setPointSize(12)
-    app.setFont(font)
-    QQuickStyle.setStyle("FluentWinUI3")
     mutex = ApplicationMutex()
     controller = AppController()
-    engine = create_engine(controller)
+    previous_excepthook = sys.excepthook
+
+    def report_exception(exception_type, exception, tb):
+        controller.reportException(exception_type, exception, tb)
+        previous_excepthook(exception_type, exception, tb)
+
+    sys.excepthook = report_exception
+    window = MainWindow(controller)
+    window.show()
     app.aboutToQuit.connect(controller.shutdown)
     result = app.exec()
-    del engine
+    sys.excepthook = previous_excepthook
+    del window
     mutex.close()
     if controller.setup_path is not None:
         QDesktopServices.openUrl(QUrl.fromLocalFile(str(controller.setup_path)))

@@ -3,12 +3,10 @@ from importlib import resources
 from pathlib import Path
 
 from loguru import logger
-from platformdirs import PlatformDirs
-
-dirs = PlatformDirs("DrLua", "DrLua")
+from drlua.profile import profile
 
 # Paths
-PROJ_ROOT = dirs.user_config_path
+PROJ_ROOT = profile.config_path
 LUA_DIR = PROJ_ROOT / "lua"
 logger.trace(f"PROJ_ROOT path is: {PROJ_ROOT}")
 PROJ_ROOT.mkdir(exist_ok=True, parents=True)
@@ -18,7 +16,7 @@ STASH_MAP = {
     "/X3": "X:"
 }
 
-DATA_DIR = dirs.user_data_path
+DATA_DIR = profile.data_path
 logger.trace(f"DATA_DIR path is: {DATA_DIR}")
 if not DATA_DIR.exists():
     DATA_DIR.mkdir(exist_ok=True, parents=True)
@@ -77,7 +75,7 @@ def sync_packaged_lua_assets(target_dir: Path = LUA_DIR) -> list[Path]:
 
 sync_packaged_lua_assets()
 
-LOG_PATH = dirs.user_log_path / "drlua.log"
+LOG_PATH = profile.log_path / "drlua.log"
 LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
 logger.remove()
 logger.add(LOG_PATH, encoding="utf-8", format="{time:YYYY-MM-DD HH:mm:ss} | {level} | {message}", catch=False)

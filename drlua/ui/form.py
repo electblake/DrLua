@@ -1,7 +1,6 @@
 from pathlib import Path
 
-from PySide6.QtCore import QObject, Property, Signal, Slot
-from PySide6.QtQml import QmlElement, QmlUncreatable
+from PySide6.QtCore import QObject, Property, QThread, Signal, Slot
 
 from drlua.application import catalog
 from drlua.application.generation import (
@@ -10,31 +9,71 @@ from drlua.application.generation import (
     split_sources,
     split_tags,
 )
-
-QML_IMPORT_NAME = "DrLua"
-QML_IMPORT_MAJOR_VERSION = 1
+from drlua.ui.jobs import MetadataJob
 
 
-@QmlElement
-@QmlUncreatable("Owned by the application controller")
+def source_metadata(source):
+    name = default_name(source)
+    if QThread.currentThread().isInterruptionRequested():
+        return
+    return source, name, catalog.match_section_category(source)
+
+
+def section_categories(section):
+    return section, catalog.category_options(section)
+
+
 class FormModel(QObject):
     sourcesChanged = Signal()
+    recursiveChanged = Signal()
     nameChanged = Signal()
     sectionChanged = Signal()
     categoryChanged = Signal()
     groupChanged = Signal()
     tagsChanged = Signal()
     categoriesChanged = Signal()
+    inferenceFinished = Signal(object, object)
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self._sources = ""
+        self._recursive = True
         self._name = ""
         self._section = catalog.section_options()[0]
         self._category = ""
         self._group = ""
         self._tags = ""
-        self._categories = catalog.category_options(self._section)
+        self._categories = []
+        self._jobs = []
+        self._inference_source = None
+        self.inferenceJob = None
+        self._inferred_source = None
+        self.loadCategories()
+
+    def start_job(self, job):
+        self._jobs.append(job)
+        job.finished.connect(self.jobFinished)
+        job.finished.connect(job.deleteLater)
+        job.start()
+
+    @Slot()
+    def jobFinished(self):
+        if self.sender() is self.inferenceJob:
+            self._inference_source = None
+            self.inferenceJob = None
+        self._jobs.remove(self.sender())
+
+    def loadCategories(self):
+        job = MetadataJob(section_categories, self._section, parent=self)
+        job.resultReady.connect(self.categoriesReceived)
+        self.start_job(job)
+
+    @Slot(object)
+    def categoriesReceived(self, result):
+        section, categories = result
+        if section == self._section:
+            self._categories = categories
+            self.categoriesChanged.emit()
 
     @Property(str, notify=sourcesChanged)
     def sources(self):
@@ -45,6 +84,16 @@ class FormModel(QObject):
         if self._sources != value:
             self._sources = value
             self.sourcesChanged.emit()
+
+    @Property(bool, notify=recursiveChanged)
+    def recursive(self):
+        return self._recursive
+
+    @recursive.setter
+    def recursive(self, value):
+        if self._recursive != value:
+            self._recursive = value
+            self.recursiveChanged.emit()
 
     @Property(str, notify=nameChanged)
     def name(self):
@@ -64,8 +113,9 @@ class FormModel(QObject):
     def section(self, value):
         if self._section != value:
             self._section = value
-            self._categories = catalog.category_options(value.strip())
+            self._categories = []
             self.categoriesChanged.emit()
+            self.loadCategories()
             self.sectionChanged.emit()
             self.category = ""
             self.tags = ""
@@ -115,12 +165,46 @@ class FormModel(QObject):
     def inferSource(self):
         paths = split_sources(self._sources)
         if paths:
+            if paths[0] == self._inference_source:
+                return
+            if paths[0] == self._inferred_source and self._name.strip():
+                return
+            self._inference_source = paths[0]
+            job = MetadataJob(source_metadata, paths[0], parent=self)
+            self.inferenceJob = job
+            job.resultReady.connect(self.sourceReceived)
+            self.start_job(job)
+
+    @Slot(object)
+    def sourceReceived(self, result):
+        job = self.sender()
+        if job.cancelled:
+            return
+        source, name, (section, category) = result
+        if job is self.inferenceJob and split_sources(self._sources)[:1] == [source]:
             if not self._name.strip():
-                self.name = default_name(paths[0])
-            section, category = catalog.match_section_category(paths[0])
+                self.name = name
             if section:
                 self.section = section
                 self.category = category or ""
+            self._inferred_source = source
+        if self.sender() is self.inferenceJob:
+            self._inference_source = None
+        self.inferenceFinished.emit(job, result)
+
+    def cancelInference(self, job):
+        job.cancel()
+        if job is self.inferenceJob:
+            self.inferenceJob = None
+            self._inference_source = None
+
+    @property
+    def inferencePending(self):
+        return self._inference_source is not None and split_sources(self._sources)[:1] == [self._inference_source]
+
+    def shutdown(self):
+        for job in self._jobs:
+            job.wait()
 
     @Slot("QVariantList")
     def appendUrls(self, urls):
@@ -129,11 +213,13 @@ class FormModel(QObject):
         )
         self.inferSource()
 
-    def snapshot(self) -> GenerationRequest:
+    def snapshot(self, output_directory: Path) -> GenerationRequest:
         return GenerationRequest(
             tuple(Path(value) for value in split_sources(self._sources)),
             self._name.strip(),
             self._section.strip(),
             self._group.strip(),
             tuple(split_tags(self._tags)),
+            output_directory,
+            recursive=self._recursive,
         )

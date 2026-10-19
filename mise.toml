@@ -11,7 +11,7 @@ UV_LINK_MODE="copy"
 run = "uv run python -I -m PyInstaller --clean drlua.spec"
 
 [tasks.build-setup]
-description = "Build the Qt Quick app and Windows installer (pass -FfmpegRoot)"
+description = "Build the Qt Widgets app and Windows installer (pass -FfmpegRoot)"
 run = "pwsh -NoProfile -File scripts/build-setup.ps1"
 
 [tasks.release]

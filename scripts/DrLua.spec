@@ -14,7 +14,6 @@ os.environ["PATH"] = os.pathsep.join((str(qt_root), str(Path(os.environ["SystemR
 data = [
     (str(root / "drlua/lua"), "drlua/lua"),
     (str(root / "drlua/fusion"), "drlua/fusion"),
-    (str(root / "drlua/ui/qml"), "drlua/ui/qml"),
     (str(root / "build/vendor/ffprobe.exe"), "tools/ffmpeg"),
     (str(root / "build/vendor/LICENSE"), "tools/ffmpeg"),
     (str(root / "build/vendor/README.txt"), "tools/ffmpeg"),

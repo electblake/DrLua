@@ -14,7 +14,6 @@ a = Analysis(
     datas=[
         ('drlua\\lua', 'drlua\\lua'),
         ('drlua\\fusion\\*.setting', 'drlua\\fusion'),
-        ('drlua/ui/qml', 'drlua/ui/qml'),
         ('build/vendor/ffprobe.exe', 'tools/ffmpeg'),
         ('build/vendor/LICENSE', 'tools/ffmpeg'),
         ('build/vendor/README.txt', 'tools/ffmpeg'),

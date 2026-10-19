@@ -22,11 +22,10 @@ def test_installer_launch_follows_ui_shutdown_workers_and_mutex(monkeypatch, tmp
 
     app.exec.side_effect = execute
     mutex = SimpleNamespace(close=lambda: events.append("mutex released"))
-    monkeypatch.setattr(application, "QGuiApplication", lambda args: app)
-    monkeypatch.setattr(application.QQuickStyle, "setStyle", lambda style: None)
+    monkeypatch.setattr(application, "QApplication", lambda args: app)
     monkeypatch.setattr(application, "AppController", lambda: controller)
     monkeypatch.setattr(application, "ApplicationMutex", lambda: mutex)
-    monkeypatch.setattr(application, "create_engine", lambda controller: object())
+    monkeypatch.setattr(application, "MainWindow", lambda controller: Mock())
 
     def launch(url):
         assert url.toLocalFile() == setup.as_posix()

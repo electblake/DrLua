@@ -1,5 +1,6 @@
 from pathlib import Path
 import re
+from PySide6.QtCore import QThread
 
 from drlua.section_category_data import SECTION_CATEGORY_DATA
 
@@ -64,6 +65,8 @@ def match_section_category(path_value: str) -> tuple[str | None, str | None]:
         return None, None
 
     for section, raw_section_data in sections.items():
+        if QThread.currentThread().isInterruptionRequested():
+            return
         if not isinstance(raw_section_data, dict):
             continue
 
@@ -80,6 +83,8 @@ def match_section_category(path_value: str) -> tuple[str | None, str | None]:
         if not isinstance(categories, dict):
             continue
         for category, raw_category_data in categories.items():
+            if QThread.currentThread().isInterruptionRequested():
+                return
             if not isinstance(raw_category_data, dict):
                 continue
             category_path = str(raw_category_data.get("Path", "")).rstrip("\\/")

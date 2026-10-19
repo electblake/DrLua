@@ -14,7 +14,6 @@ def test_create_bins_with_sample_videos(tmp_path: Path, monkeypatch: pytest.Monk
     sample_dir = Path(__file__).resolve().parents[1] / "data" / "sample"
     assert sample_dir.is_dir()
 
-    monkeypatch.setattr(create_bins_module, "PROCESSED_DATA_DIR", tmp_path / "processed")
 
     log_path = tmp_path / "generation.log"
     sink = logger.add(log_path, catch=False)
@@ -25,11 +24,11 @@ def test_create_bins_with_sample_videos(tmp_path: Path, monkeypatch: pytest.Monk
         section="Fansites",
         tag=["integration"],
         vertical_only=True,
+        output_directory=tmp_path / "processed" / "create_bins",
         progress=lambda *event: progress.append(event),
     )
 
     logger.remove(sink)
-    assert result is None
     assert progress[0] == ("Scanning sources", 0, 1)
     probing = [event for event in progress if event[0] == "Probing media"]
     total = probing[0][2]
@@ -42,6 +41,7 @@ def test_create_bins_with_sample_videos(tmp_path: Path, monkeypatch: pytest.Monk
 
     generated_files = list((tmp_path / "processed" / "create_bins").glob("*.lua"))
     assert len(generated_files) == 1
+    assert result == generated_files[0]
 
     generated_lua = generated_files[0].read_text(encoding="utf-8")
     assert "CreateBins(" in generated_lua

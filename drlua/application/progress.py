@@ -19,7 +19,7 @@ class Progress:
 
     @property
     def maximum(self) -> int:
-        return self.total if self.stage == "Scanning sources" else self.total + 2
+        return 0 if self.stage in ("Preparing sources", "Scanning sources") else self.total + 2
 
     @property
     def value(self) -> int:

@@ -6,16 +6,16 @@ import json
 import os
 import shutil
 import sys
+import tempfile
 
 from datetime import datetime
 from fractions import Fraction
 from pathlib import Path, PurePosixPath
 
 from loguru import logger
-from PySide6.QtCore import QProcess
+from PySide6.QtCore import QProcess, QThread
 from drlua.config import (
     LUA_DIR,
-    PROCESSED_DATA_DIR,
     SCENE_NAME_SEP,
     STASH_MAP,
     SUPPORTED_EXTENSIONS,
@@ -26,6 +26,7 @@ from drlua.helpers.scenerules import NameTag, ReleaseName
 
 import luadata
 from drlua import __version__
+from drlua.profile import profile
 
 
 def lua_header(release_name:ReleaseName, input_location: str|Path, outfile:str|Path):
@@ -92,19 +93,31 @@ def make_include_kinds_from_args(vertical_only, full_only):
     return include_kinds
 
 
-def collect_folder_media_files(input_path: Path, recursive:bool=True):
+def collect_folder_media_files(input_path: Path, recursive:bool=True, activity=None):
+    if activity is not None:
+        activity(f"Scanning folder: {input_path}")
     input_path = Path(input_path).expanduser().resolve()
     media_files: list[Path] = []
     if recursive:
         for root, _, files in os.walk(input_path):
+            if QThread.currentThread().isInterruptionRequested():
+                return
+            if activity is not None:
+                activity(f"Scanning directory: {root} ({len(media_files)} media files found)")
             root_path = Path(root)
-            for file_name in files:
+            for index, file_name in enumerate(files):
+                if QThread.currentThread().isInterruptionRequested():
+                    return
+                if activity is not None and index % 100 == 0:
+                    activity(f"Inspecting entry {index + 1}/{len(files)} in {root}: {file_name}")
                 input_path = (root_path / file_name).resolve()
                 if input_path.suffix.lower() in SUPPORTED_EXTENSIONS:
                     media_files.append(input_path)
     else:
         with os.scandir(input_path) as entries:
             for entry in entries:
+                if QThread.currentThread().isInterruptionRequested():
+                    return
                 if not entry.is_file():
                     continue
                 input_path = Path(entry.path).resolve()
@@ -122,6 +135,8 @@ def collect_efu_media_files(input_file: Path):
             raise RuntimeError(f"Unsupported EFU header in {input_file}")
 
         for row in reader:
+            if QThread.currentThread().isInterruptionRequested():
+                return
             if not row:
                 continue
             raw_path = row[0].strip()
@@ -141,6 +156,8 @@ def collect_metadata_csv_media_files(input_file: Path):
     media_files: list[Path] = []
     with input_file.open("r", encoding="utf-16", newline="") as handle:
         for row in csv.DictReader(handle):
+            if QThread.currentThread().isInterruptionRequested():
+                return
             media_file = (Path(row["Clip Directory"].strip()) / row["File Name"].strip()).resolve()
             if media_file.suffix.lower() in SUPPORTED_EXTENSIONS:
                 media_files.append(media_file)
@@ -166,10 +183,14 @@ def collect_stash_export_media_files(input_path: Path):
     media_files: list[Path] = []
     export_jsons = [input_path] if input_path.is_file() else input_path.glob("**/*.json")
     for export_json in export_jsons:
+        if QThread.currentThread().isInterruptionRequested():
+            return
         with export_json.open("r", encoding="utf-8") as fp:
             data = json.load(fp)
 
         for raw_path in data.get("files", []):
+            if QThread.currentThread().isInterruptionRequested():
+                return
             if not isinstance(raw_path, str) or not raw_path.strip():
                 continue
 
@@ -188,8 +209,11 @@ def collect_stash_export_media_files(input_path: Path):
 def probe_media_files_to_clips(
     media_files: list[Path],
     progress: Callable[[str, int, int], None] | None = None,
-) -> list[ClipDataInput]:
+    activity=None,
+) -> list[ClipDataInput] | None:
     clips: list[ClipDataInput] = []
+    if activity is not None:
+        activity("Locating FFprobe")
     ffprobe_path = (
         str(Path(sys._MEIPASS) / "tools" / "ffmpeg" / "ffprobe.exe")
         if getattr(sys, "frozen", False)
@@ -198,6 +222,10 @@ def probe_media_files_to_clips(
     if not ffprobe_path:
         raise RuntimeError(f"ffprobe not found: {ffprobe_path}")
     for index, media_file in enumerate(media_files):
+        if QThread.currentThread().isInterruptionRequested():
+            return
+        if activity is not None:
+            activity(f"Probing file {index + 1}/{len(media_files)}: {media_file}")
         if progress is not None:
             progress("Probing media", index, len(media_files))
         logger.info("Probing {}", media_file)
@@ -207,7 +235,14 @@ def probe_media_files_to_clips(
             "stream=codec_type,codec_name,width,height,nb_frames,avg_frame_rate,r_frame_rate,duration:format=duration",
             "-of", "json", str(media_file),
         ])
-        process.waitForFinished(-1)
+        while process.state() != QProcess.ProcessState.NotRunning:
+            if QThread.currentThread().isInterruptionRequested():
+                process.kill()
+                process.waitForFinished(-1)
+                return
+            process.waitForFinished(50)
+        if QThread.currentThread().isInterruptionRequested():
+            return
 
         file_stat = media_file.stat()
         file_size = file_stat.st_size
@@ -262,10 +297,14 @@ def make_bin_groups(clips, release_name: ReleaseName, include_kinds):
     clips_sorted = sorted(clips, key=lambda item: (-item.frames, item.path.name.lower()))
     video_items = [VideoItem(filename=str(clip.path), frame_length=clip.frames) for clip in clips_sorted]
     grouped_videos = split_videos_by_frame_count(video_items, group_count=3)
+    if QThread.currentThread().isInterruptionRequested():
+        return
     clips_by_path = {str(clip.path): clip for clip in clips}
 
     grouped_bins= []
     for video_group in grouped_videos:
+        if QThread.currentThread().isInterruptionRequested():
+            return
         bucket_clips = [clips_by_path[video.filename] for video in video_group]
         grouped_bins.append(
             {
@@ -276,6 +315,8 @@ def make_bin_groups(clips, release_name: ReleaseName, include_kinds):
 
     output_bins: list[ClipBinGroup] = []
     for layer, bucket in enumerate(sorted(grouped_bins, key=lambda item: item["total_frames"]), start=1):
+        if QThread.currentThread().isInterruptionRequested():
+            return
         vertical = [clip for clip in bucket["clips"] if clip.kind == "Vertical"]
         full = [clip for clip in bucket["clips"] if clip.kind == "Full"]
         vertical.sort(key=lambda item: (item.frames, item.path.name.lower()))
@@ -316,6 +357,8 @@ def make_payload(
     logger.trace(f"[make_payload] bin_groups {bin_groups}")
 
     for index, clips_bin in enumerate(bin_groups):
+        if QThread.currentThread().isInterruptionRequested():
+            return
         if index >= 1 and index <= 26:
             layer_suffix = chr(ord("A") + index - 1)
         else:
@@ -358,9 +401,17 @@ def create_bins(
     full_only: bool = False,
     bins_only: bool = False,
     progress: Callable[[str, int, int], None] | None = None,
-) -> None:
+    output_directory: Path = profile.save_directory,
+    activity=None,
+) -> Path | None:
     tag = list(tag or [])
-    input_locations = [Path(from_location).expanduser().resolve() for from_location in from_locations]
+    input_locations = []
+    for from_location in from_locations:
+        if QThread.currentThread().isInterruptionRequested():
+            return
+        if activity is not None:
+            activity(f"Resolving source: {from_location}")
+        input_locations.append(Path(from_location).expanduser().resolve())
     name = name.strip()
     section = section.strip()
     tag = [item.strip() for item in tag if item and item.strip()]
@@ -369,30 +420,40 @@ def create_bins(
 
     media_files = []
     for index, input_location_item in enumerate(input_locations):
+        if QThread.currentThread().isInterruptionRequested():
+            return
+        if activity is not None:
+            activity(f"Inspecting source {index + 1}/{len(input_locations)}: {input_location_item}")
         if progress is not None:
             progress("Scanning sources", index, len(input_locations))
         if input_location_item.is_dir():
-            collected_files = collect_folder_media_files(input_location_item, recursive)
-            if len(collected_files) == 0 and len(list(input_location_item.glob("**/*.json"))) > 0:
+            collected_files = collect_folder_media_files(input_location_item, recursive, activity)
+            if QThread.currentThread().isInterruptionRequested():
+                return
+            if len(collected_files) == 0:
                 collected_files = collect_stash_export_media_files(input_location_item)
-            media_files.extend(collected_files)
         elif input_location_item.suffix.lower() in SUPPORTED_EXTENSIONS:
-            media_files.append(input_location_item)
+            collected_files = [input_location_item]
         elif input_location_item.suffix.lower() == ".efu":
-            media_files.extend(collect_efu_media_files(input_location_item))
+            collected_files = collect_efu_media_files(input_location_item)
         elif input_location_item.suffix.lower() == ".csv":
-            media_files.extend(collect_metadata_csv_media_files(input_location_item))
+            collected_files = collect_metadata_csv_media_files(input_location_item)
         elif input_location_item.suffix.lower() == ".json":
-            media_files.extend(collect_stash_export_media_files(input_location_item))
+            collected_files = collect_stash_export_media_files(input_location_item)
         else:
-            raise RuntimeError("Could not process input location")
+            raise RuntimeError(f"Could not process input location: {input_location_item}")
+        if QThread.currentThread().isInterruptionRequested():
+            return
+        media_files.extend(collected_files)
 
     if len(media_files) == 0:
         raise RuntimeError(f"No supported media files found in {input_locations}")
 
     logger.debug(f"Collected {len(media_files)} media files..")
 
-    clips = probe_media_files_to_clips(media_files, progress)
+    clips = probe_media_files_to_clips(media_files, progress, activity)
+    if QThread.currentThread().isInterruptionRequested():
+        return
 
     if len(clips) == 0:
         raise RuntimeError(f"No readable video clips found in {input_locations}.")
@@ -402,23 +463,31 @@ def create_bins(
     release_name = ReleaseName(**locals())
     logger.info(f"Release name {release_name.text()}")
 
-    out_file_path = PROCESSED_DATA_DIR / "create_bins" / release_name.file_name()
+    out_file_path = output_directory / release_name.file_name()
     include_kinds = make_include_kinds_from_args(vertical_only, full_only)
 
     if progress is not None:
         progress("Grouping clips", len(media_files), len(media_files))
+    if activity is not None:
+        activity(f"Grouping {len(clips)} clips")
     output_bins = make_bin_groups(clips, release_name, include_kinds)
+    if QThread.currentThread().isInterruptionRequested():
+        return
     if len(output_bins) == 0:
         raise RuntimeError(f"No output bins could be created for kinds: {', '.join(include_kinds)}")
     logger.debug(f"Made bins({len(output_bins)}) with total_frames {[o.total_frames for o in output_bins]}")
 
     payload = make_payload(release_name, output_bins, not bins_only, include_kinds)
+    if QThread.currentThread().isInterruptionRequested():
+        return
     logger.debug(f"Made payload for parent_bin_name={payload['parent_bin_name']}")
     if not payload:
         raise RuntimeError("payload empty")
 
     if progress is not None:
         progress("Writing Lua script", len(media_files), len(media_files))
+    if activity is not None:
+        activity(f"Writing Lua script: {out_file_path}")
     header = lua_header(release_name, input_locations, out_file_path)
     out_file_path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -432,7 +501,16 @@ def create_bins(
 
     output_lua = "\n".join(output_lines)
 
-    out_file_path.write_text(output_lua, encoding="utf-8", newline="\n",)
+    with tempfile.TemporaryDirectory(prefix=".drlua-", dir=out_file_path.parent) as staging:
+        staged_file = Path(staging) / out_file_path.name
+        with staged_file.open("w", encoding="utf-8", newline="\n") as handle:
+            for offset in range(0, len(output_lua), 65536):
+                if QThread.currentThread().isInterruptionRequested():
+                    return
+                handle.write(output_lua[offset:offset + 65536])
+        if QThread.currentThread().isInterruptionRequested():
+            return
+        staged_file.replace(out_file_path)
     logger.success(f"Saved file {out_file_path.name}")
     dofile = f"\tdofile([[{out_file_path.expanduser().resolve().as_posix()}]])"
     hint = [
@@ -444,3 +522,4 @@ def create_bins(
     logger.info("\n".join(hint))
     if progress is not None:
         progress("Complete", len(media_files), len(media_files))
+    return out_file_path
