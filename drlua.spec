@@ -12,6 +12,7 @@ a = Analysis(
     pathex=[],
     binaries=[],
     datas=[
+        ('assets/DrLua-app-icon.ico', 'assets'),
         ('drlua\\lua', 'drlua\\lua'),
         ('drlua\\fusion\\*.setting', 'drlua\\fusion'),
         ('build/vendor/ffprobe.exe', 'tools/ffmpeg'),
@@ -35,6 +36,7 @@ exe = EXE(
     a.datas,
     [],
     name='drlua',
+    icon='assets/DrLua-app-icon.ico',
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,

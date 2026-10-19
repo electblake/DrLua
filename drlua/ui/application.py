@@ -1,9 +1,10 @@
 """Qt Widgets application composition and desktop lifecycle."""
 
 import sys
+from pathlib import Path
 
 from PySide6.QtCore import QUrl
-from PySide6.QtGui import QDesktopServices
+from PySide6.QtGui import QDesktopServices, QIcon
 from PySide6.QtWidgets import QApplication
 
 from drlua import __version__
@@ -17,6 +18,7 @@ def run_application() -> int:
     app.setApplicationName("DrLua")
     app.setApplicationVersion(__version__)
     app.setOrganizationName("DrLua")
+    app.setWindowIcon(QIcon(str(Path(__file__).resolve().parents[2] / "assets" / "DrLua-app-icon.ico")))
     mutex = ApplicationMutex()
     controller = AppController()
     previous_excepthook = sys.excepthook
