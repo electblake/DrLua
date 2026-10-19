@@ -7,6 +7,16 @@ and this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ## [Unreleased]
 
+## [0.5.3] - 2026-10-18
+
+### Added
+
+- Added all current icon artwork and variants to the repository, including grayscale, sapphire blue, Resolve colors, colorful curves, and golden-red assets.
+
+### Changed
+
+- Switched the Windows installer to `DrLua-icon-high-contrast grayscale.ico` while retaining `DrLua-app-icon.ico` for the application.
+
 ## [0.5.2] - 2026-10-18
 
 ### Added
@@ -123,7 +133,8 @@ and this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 - Import media from folders, Everything file lists, metadata CSV files, and Stash exports.
 - Provide an interactive Windows launcher, generated Lua file management, and Windows Explorer context menu integration.
 
-[Unreleased]: https://github.com/electblake/DrLua/compare/v0.5.2...HEAD
+[Unreleased]: https://github.com/electblake/DrLua/compare/v0.5.3...HEAD
+[0.5.3]: https://github.com/electblake/DrLua/compare/v0.5.2...v0.5.3
 [0.5.2]: https://github.com/electblake/DrLua/compare/v0.5.1...v0.5.2
 [0.5.1]: https://github.com/electblake/DrLua/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/electblake/DrLua/compare/v0.4.0...v0.5.0
