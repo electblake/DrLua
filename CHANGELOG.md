@@ -7,6 +7,15 @@ and this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ## [Unreleased]
 
+### Added
+
+- Added a Software Update dialog with version details, download progress, and a Quit and Install action.
+- Added a View Releases button to open the GitHub releases page.
+
+### Changed
+
+- Moved manual update checks to the Extras tab and cached downloaded installers in the application updates directory.
+
 ## [0.5.5] - 2026-10-18
 
 ### Added
