@@ -39,10 +39,63 @@ class SavedFilesList(QListWidget):
         self.context_menu.popup(position)
 
 
+class SoftwareUpdateDialog(QDialog):
+    def __init__(self, controller, parent):
+        super().__init__(parent, objectName="softwareUpdateDialog")
+        self.controller = controller
+        self.setWindowTitle("Software Update")
+        self.setWindowModality(Qt.WindowModality.WindowModal)
+        self.setMinimumWidth(460)
+        layout = QVBoxLayout(self)
+        self.status = QLabel(objectName="updateStatusLabel")
+        self.status.setWordWrap(True)
+        layout.addWidget(self.status)
+        self.progress = QProgressBar(objectName="updateProgress")
+        layout.addWidget(self.progress)
+        buttons = QHBoxLayout()
+        self.download_button = QPushButton("Download Update", objectName="downloadUpdateButton")
+        self.download_button.clicked.connect(controller.downloadUpdate)
+        buttons.addWidget(self.download_button)
+        self.install_button = QPushButton("Quit and Install", objectName="installUpdateButton")
+        self.install_button.clicked.connect(parent.install_update)
+        buttons.addWidget(self.install_button)
+        self.close_button = QPushButton("Close", objectName="closeUpdateButton")
+        self.close_button.clicked.connect(self.reject)
+        buttons.addWidget(self.close_button)
+        layout.addLayout(buttons)
+        controller.updateChanged.connect(self.refresh)
+        controller.updateProgress.connect(self.refresh_progress)
+        controller.updateStarted.connect(self.open)
+        self.refresh()
+
+    def refresh(self):
+        busy = self.controller.update_busy
+        self.status.setText(self.controller.update_status)
+        self.download_button.setEnabled(not busy and self.controller.update_available and not self.controller.update_ready)
+        self.install_button.setEnabled(not busy and self.controller.update_ready)
+        self.close_button.setEnabled(not busy)
+
+    def refresh_progress(self, current, total):
+        self.progress.setRange(0, 0 if current == 0 else 1000)
+        if current != 0:
+            self.progress.setValue(round(current / total * 1000))
+
+    def reject(self):
+        if not self.controller.update_busy:
+            super().reject()
+
+    def closeEvent(self, event):
+        if self.controller.update_busy:
+            event.ignore()
+        else:
+            super().closeEvent(event)
+
+
 class MainWindow(QMainWindow):
     def __init__(self, controller: AppController):
         super().__init__()
         self.controller = controller
+        self.pending_installer = None
         self.setWindowTitle(f"DrLua v{controller.version}")
         self.resize(1000, 880)
         self.tabs = QTabWidget(objectName="mainTabs")
@@ -68,8 +121,6 @@ class MainWindow(QMainWindow):
         controller.statusChanged.connect(self.refresh_status)
         controller.progressChanged.connect(self.refresh_progress)
         controller.outputAppended.connect(self.append_output)
-        controller.updateAvailable.connect(self.offer_update)
-        controller.installReady.connect(self.close)
         controller.filesListed.connect(self.show_files)
         controller.filesDeleted.connect(self.files_deleted)
         controller.fileRenamed.connect(self.file_renamed)
@@ -351,12 +402,6 @@ class MainWindow(QMainWindow):
         layout = QFormLayout(self.settings_page)
         layout.setRowWrapPolicy(QFormLayout.RowWrapPolicy.WrapLongRows)
         layout.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.AllNonFixedFieldsGrow)
-        self.check_updates = QPushButton("Check for &updates", objectName="checkUpdatesButton")
-        self.check_updates.clicked.connect(self.controller.checkUpdates)
-        update_row = QHBoxLayout()
-        update_row.addWidget(self.check_updates)
-        update_row.addStretch()
-        layout.addRow("Updates:", update_row)
         if self.controller.profile.no_profile:
             notice = QLabel("No profile: saved preferences are ignored. Changes apply only to this session; output defaults to temporary storage.")
             notice.setWordWrap(True)
@@ -364,6 +409,19 @@ class MainWindow(QMainWindow):
 
     def build_extras(self):
         layout = QVBoxLayout(self.extras_page)
+        updates_group = QGroupBox("Updates")
+        updates_layout = QVBoxLayout(updates_group)
+        updates_layout.addWidget(QLabel(f"Installed version: {self.controller.version}", objectName="installedVersionLabel"))
+        update_buttons = QHBoxLayout()
+        self.check_updates = QPushButton("Check for Updates", objectName="checkUpdatesButton")
+        self.check_updates.clicked.connect(self.controller.checkUpdates)
+        update_buttons.addWidget(self.check_updates)
+        self.view_releases = QPushButton("View Releases", objectName="viewReleasesButton")
+        self.view_releases.clicked.connect(self.controller.viewReleases)
+        update_buttons.addWidget(self.view_releases)
+        update_buttons.addStretch()
+        updates_layout.addLayout(update_buttons)
+        layout.addWidget(updates_group)
         explorer = QGroupBox("File Explorer")
         form = QVBoxLayout(explorer)
         hint = QLabel(
@@ -394,6 +452,7 @@ class MainWindow(QMainWindow):
         help_menu.addAction("&About", self.show_about)
 
     def build_dialogs(self):
+        self.update_dialog = SoftwareUpdateDialog(self.controller, self)
         self.folder_dialog = QFileDialog(self, "Add source folder")
         self.folder_dialog.setFileMode(QFileDialog.FileMode.Directory)
         self.folder_dialog.setOption(QFileDialog.Option.ShowDirsOnly)
@@ -432,6 +491,9 @@ class MainWindow(QMainWindow):
         self.copy_lua.setEnabled(bool(self.controller.generatedCommand))
         self.check_updates.setEnabled(not self.controller.busy)
         self.install_explorer.setEnabled(not self.controller.busy)
+        self.view_releases.setEnabled(not self.controller.busy)
+        self.tabs.setEnabled(not self.controller.update_busy)
+        self.menuBar().setEnabled(not self.controller.update_busy)
 
     def refresh_status(self):
         self.status.setText(self.controller.status)
@@ -467,21 +529,16 @@ class MainWindow(QMainWindow):
     def select_save_directory(self, directory):
         self.controller.saveDirectory = directory
 
-    def offer_update(self, version):
-        self.update_prompt = QMessageBox(
-            QMessageBox.Icon.Question, "Update DrLua",
-            f"DrLua {version} is available. Download and install it?",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No, self,
-        )
-        self.update_prompt.setDefaultButton(QMessageBox.StandardButton.No)
-        self.update_prompt.finished.connect(self.update_decided)
-        self.update_prompt.open()
+    def install_update(self):
+        self.pending_installer = self.controller.setup_path
+        self.update_dialog.close()
+        self.close()
 
-    def update_decided(self, result):
-        if result == QMessageBox.StandardButton.Yes:
-            self.controller.acceptUpdate()
+    def closeEvent(self, event):
+        if self.controller.update_busy:
+            event.ignore()
         else:
-            self.controller.declineUpdate()
+            super().closeEvent(event)
 
     def show_about(self):
         self.about_dialog = QDialog(self, objectName="aboutDialog")

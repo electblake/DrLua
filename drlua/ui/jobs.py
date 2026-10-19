@@ -104,3 +104,17 @@ class UpdateJob(QThread):
 
     def run(self) -> None:
         self.resultReady.emit(self.operation(*self.args))
+
+
+class DownloadUpdateJob(QThread):
+    resultReady = Signal(object)
+    progress = Signal(object, object)
+
+    def __init__(self, release, parent=None):
+        super().__init__(parent)
+        self.release = release
+
+    def run(self):
+        from drlua.updates import download_setup
+
+        self.resultReady.emit(download_setup(self.release, self.progress.emit))

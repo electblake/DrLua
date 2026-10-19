@@ -1,10 +1,10 @@
 """Qt Widgets application composition and desktop lifecycle."""
 
+import os
 import sys
 from pathlib import Path
 
-from PySide6.QtCore import QUrl
-from PySide6.QtGui import QDesktopServices, QIcon
+from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import QApplication
 
 from drlua import __version__
@@ -37,8 +37,7 @@ def run_application() -> int:
     app.aboutToQuit.connect(controller.shutdown)
     result = app.exec()
     sys.excepthook = previous_excepthook
-    del window
     mutex.close()
-    if controller.setup_path is not None:
-        QDesktopServices.openUrl(QUrl.fromLocalFile(str(controller.setup_path)))
+    if window.pending_installer is not None:
+        os.startfile(window.pending_installer)
     return result

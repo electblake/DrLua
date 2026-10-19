@@ -12,7 +12,7 @@ from drlua.application.generation import split_sources
 from drlua.application.progress import Progress
 from drlua.profile import profile
 from drlua.ui.form import FormModel
-from drlua.ui.jobs import DeleteFilesJob, FilesJob, GenerationJob, RenameFileJob, UpdateJob
+from drlua.ui.jobs import DeleteFilesJob, DownloadUpdateJob, FilesJob, GenerationJob, RenameFileJob, UpdateJob
 
 
 class AppController(QObject):
@@ -21,8 +21,9 @@ class AppController(QObject):
     progressChanged = Signal()
     canGenerateChanged = Signal()
     outputAppended = Signal(str)
-    updateAvailable = Signal(str)
-    installReady = Signal()
+    updateChanged = Signal()
+    updateStarted = Signal()
+    updateProgress = Signal(object, object)
     logReceived = Signal(str)
     saveDirectoryChanged = Signal()
     filesListed = Signal(object, object)
@@ -52,6 +53,10 @@ class AppController(QObject):
         self._started_at = 0
         self.setup_path: Path | None = None
         self._release = None
+        self.update_available = False
+        self.update_ready = False
+        self.update_busy = False
+        self.update_status = ""
         self._form.sourcesChanged.connect(self.canGenerateChanged)
         self.busyChanged.connect(self.canGenerateChanged)
         self._form.inferenceFinished.connect(self.sourcePrepared)
@@ -332,41 +337,57 @@ class AppController(QObject):
 
     @Slot()
     def checkUpdates(self):
+        self._release = None
+        self.setup_path = None
+        self.update_available = False
+        self.update_ready = False
+        self.update_busy = True
+        self.update_status = "Checking for updates…"
         self.set_busy(True)
-        self.set_status("Checking for updates…")
+        self.updateChanged.emit()
+        self.updateProgress.emit(0, 0)
+        self.updateStarted.emit()
         job = UpdateJob(updates.latest_release, parent=self)
-        self._active_job = job
         job.resultReady.connect(self.releaseReceived)
         self.start_job(job)
 
     @Slot(object)
     def releaseReceived(self, release):
         self._release = release
-        if updates.version_tuple(release["tag_name"]) > updates.version_tuple(
-            __version__
-        ):
-            self.updateAvailable.emit(release["tag_name"])
-        else:
-            self.set_status(f"DrLua {__version__} is up to date.")
-            self.set_busy(False)
-
-    @Slot()
-    def declineUpdate(self):
-        self.set_status("Update cancelled.")
+        version = release["tag_name"].removeprefix("v")
+        self.update_available = updates.version_tuple(version) > updates.version_tuple(__version__)
+        status = "Update available" if self.update_available else "Up to date"
+        self.update_status = f"Installed: {__version__} · Latest: {version}\n{status}"
+        self.update_busy = False
+        self.updateProgress.emit(1, 1)
         self.set_busy(False)
+        self.updateChanged.emit()
 
     @Slot()
-    def acceptUpdate(self):
-        self.set_status("Downloading update…")
-        job = UpdateJob(updates.download_setup, self._release, parent=self)
-        self._active_job = job
+    def downloadUpdate(self):
+        self.update_busy = True
+        self.update_status = "Downloading update…"
+        self.set_busy(True)
+        self.updateChanged.emit()
+        self.updateProgress.emit(0, 0)
+        job = DownloadUpdateJob(self._release, self)
+        job.progress.connect(self.updateProgress)
         job.resultReady.connect(self.downloadReceived)
         self.start_job(job)
 
     @Slot(object)
     def downloadReceived(self, path):
         self.setup_path = path
-        self.installReady.emit()
+        self.update_ready = True
+        self.update_busy = False
+        self.update_status = "Download complete. Quit and install when ready."
+        self.updateProgress.emit(1, 1)
+        self.set_busy(False)
+        self.updateChanged.emit()
+
+    @Slot()
+    def viewReleases(self):
+        QDesktopServices.openUrl(QUrl(updates.RELEASES_URL))
 
     @Slot()
     def shutdown(self):

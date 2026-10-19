@@ -61,7 +61,7 @@ def item(root, name):
 def click(root, name):
     control = item(root, name)
     if name == "checkUpdatesButton":
-        root.tabs.setCurrentWidget(root.settings_page)
+        root.tabs.setCurrentWidget(root.extras_page)
     QTest.mouseClick(control, Qt.MouseButton.LeftButton)
 
 
@@ -494,50 +494,116 @@ def test_scaled_layout_and_theme(window, app, scheme):
     app.styleHints().unsetColorScheme()
 
 
-def test_current_update_keeps_form(window, monkeypatch, tmp_path):
+@pytest.mark.parametrize("version, available", [("99.0.0", True), ("0.1.0", False), ("0.5.5", False)])
+def test_update_check_dialog_states(window, monkeypatch, tmp_path, version, available):
     root, controller = window
+    entered = threading.Event()
+    release = threading.Event()
+    threads = []
+
+    def fetch():
+        threads.append(QThread.currentThread())
+        entered.set()
+        release.wait(3)
+        return {"tag_name": f"v{version}"}
+
+    monkeypatch.setattr(updates, "latest_release", fetch)
     controller.form.sources = str(tmp_path)
-    monkeypatch.setattr(
-        updates, "latest_release", lambda: {"tag_name": controller.version}
-    )
+    controller.setup_path = tmp_path / "previous.exe"
+    controller.update_ready = True
+    controller.update_available = True
     click(root, "checkUpdatesButton")
-    assert controller.busy
+    dialog = root.update_dialog
+    wait_until(entered.is_set)
+    assert controller.busy and controller.update_busy
+    assert controller.setup_path is None
+    assert not controller.update_available and not controller.update_ready
+    assert dialog.isVisible()
+    assert dialog.windowTitle() == "Software Update"
+    assert dialog.windowModality() == Qt.WindowModality.WindowModal
+    assert dialog.minimumWidth() == 460 and dialog.status.wordWrap()
+    assert dialog.progress.maximum() == 0
+    for button in (dialog.download_button, dialog.install_button, dialog.close_button, root.generate_button, root.install_explorer):
+        assert not button.isEnabled()
+    assert not root.tabs.isEnabled() and not root.menuBar().isEnabled()
+    QTest.keyClick(dialog, Qt.Key.Key_Escape)
+    dialog.close()
+    root.close()
+    assert dialog.isVisible() and root.isVisible()
+    assert threads[0] != QApplication.instance().thread()
+    release.set()
     wait_until(lambda: not controller.busy)
-    assert "up to date" in controller.status
+    assert dialog.status.text() == f"Installed: {controller.version} · Latest: {version}\n" + ("Update available" if available else "Up to date")
+    assert dialog.download_button.isEnabled() is available
+    assert not dialog.install_button.isEnabled()
+    assert dialog.close_button.isEnabled()
+    assert root.tabs.isEnabled() and root.menuBar().isEnabled()
     assert controller.form.sources == str(tmp_path)
+    QTest.keyClick(dialog, Qt.Key.Key_Escape)
+    assert not dialog.isVisible()
+    assert root.isVisible() and root.pending_installer is None
 
 
-def test_update_prompt_declined_with_escape(window, monkeypatch):
-    root, controller = window
-    monkeypatch.setattr(updates, "latest_release", lambda: {"tag_name": "v99.0.0"})
-    offered = QSignalSpy(controller.updateAvailable)
-    click(root, "checkUpdatesButton")
-    wait_until(lambda: offered.count() == 1)
-    QTest.qWait(200)
-    QTest.keyClick(QApplication.focusWidget(), Qt.Key.Key_Escape)
-    wait_until(lambda: not controller.busy)
-    assert controller.status == "Update cancelled."
-
-
-def test_update_download_signals_close_after_file_ready(window, monkeypatch, tmp_path):
+def test_update_download_progress_close_and_explicit_install(window, monkeypatch, tmp_path):
     root, controller = window
     setup = tmp_path / "DrLua-99.0.0-windows-amd64-Setup.exe"
+    entered = threading.Event()
+    release = threading.Event()
+    finish = threading.Event()
+    threads = []
     monkeypatch.setattr(updates, "latest_release", lambda: {"tag_name": "v99.0.0"})
 
-    def download(release):
-        assert QThread.currentThread() != QGuiApplication.instance().thread()
+    def download(release_data, progress):
+        threads.append(QThread.currentThread())
+        entered.set()
+        release.wait(3)
+        progress(1, 4)
+        finish.wait(3)
         setup.write_bytes(b"test installer")
         return setup
 
     monkeypatch.setattr(updates, "download_setup", download)
-    offered = QSignalSpy(controller.updateAvailable)
-    ready = QSignalSpy(controller.installReady)
-    controller.checkUpdates()
-    wait_until(lambda: offered.count() == 1)
-    controller.acceptUpdate()
-    wait_until(lambda: ready.count() == 1)
+    click(root, "checkUpdatesButton")
+    wait_until(lambda: not controller.busy)
+    dialog = root.update_dialog
+    QTest.mouseClick(dialog.download_button, Qt.MouseButton.LeftButton)
+    wait_until(entered.is_set)
+    assert dialog.progress.maximum() == 0
+    assert not dialog.download_button.isEnabled()
+    assert not dialog.install_button.isEnabled()
+    assert not dialog.close_button.isEnabled()
+    QTest.keyClick(dialog, Qt.Key.Key_Escape)
+    dialog.close()
+    assert dialog.isVisible()
+    release.set()
+    wait_until(lambda: dialog.progress.maximum() == 1000)
+    assert dialog.progress.value() == 250
+    assert controller.busy
+    finish.set()
+    wait_until(lambda: not controller.busy and not controller._jobs)
+    assert threads[0] != QApplication.instance().thread()
     assert controller.setup_path == setup
-    assert setup.read_bytes() == b"test installer"
+    assert dialog.status.text() == "Download complete. Quit and install when ready."
+    assert dialog.progress.value() == dialog.progress.maximum() == 1000
+    assert not dialog.download_button.isEnabled()
+    assert dialog.install_button.isEnabled() and dialog.close_button.isEnabled()
+    QTest.mouseClick(dialog.close_button, Qt.MouseButton.LeftButton)
+    assert root.isVisible() and root.pending_installer is None
+    dialog.open()
+    QTest.mouseClick(dialog.install_button, Qt.MouseButton.LeftButton)
+    assert root.pending_installer == setup
+    assert not root.isVisible() and not dialog.isVisible()
+
+
+def test_view_releases_opens_repository_releases(window, monkeypatch):
+    from PySide6.QtGui import QDesktopServices
+
+    root, controller = window
+    urls = []
+    monkeypatch.setattr(QDesktopServices, "openUrl", lambda url: urls.append(url.toString()))
+    root.tabs.setCurrentWidget(root.extras_page)
+    click(root, "viewReleasesButton")
+    assert urls == ["https://github.com/electblake/DrLua/releases"]
 
 
 def test_close_waits_for_active_worker(app, monkeypatch, tmp_path):

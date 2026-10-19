@@ -12,7 +12,8 @@ def qt_app():
     return QApplication.instance() or QApplication([])
 
 
-def test_installer_launch_follows_ui_shutdown_workers_and_mutex(monkeypatch, tmp_path, qt_app):
+@pytest.mark.parametrize("install", [False, True])
+def test_installer_launch_follows_ui_shutdown_workers_and_mutex(monkeypatch, tmp_path, qt_app, install):
     monkeypatch.setattr(application.sys, "argv", ["drlua"])
     events = []
     setup = tmp_path / "DrLua-99.0.0-windows-amd64-Setup.exe"
@@ -34,16 +35,16 @@ def test_installer_launch_follows_ui_shutdown_workers_and_mutex(monkeypatch, tmp
     monkeypatch.setattr(application, "QApplication", lambda args: app)
     monkeypatch.setattr(application, "AppController", lambda: controller)
     monkeypatch.setattr(application, "ApplicationMutex", lambda: mutex)
-    monkeypatch.setattr(application, "MainWindow", lambda controller: Mock())
+    monkeypatch.setattr(application, "MainWindow", lambda controller: Mock(pending_installer=setup if install else None))
 
-    def launch(url):
-        assert url.toLocalFile() == setup.as_posix()
+    def launch(path):
+        assert path == setup
         assert events == ["window closed", "workers finished", "mutex released"]
         events.append("installer launched")
 
-    monkeypatch.setattr(application.QDesktopServices, "openUrl", launch)
+    monkeypatch.setattr(application.os, "startfile", launch)
     assert application.run_application() == 0
-    assert events[-1] == "installer launched"
+    assert (events[-1] == "installer launched") is install
 
 
 def test_explorer_directory_populates_form_before_window(monkeypatch, tmp_path, qt_app):
