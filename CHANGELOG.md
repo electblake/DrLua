@@ -7,6 +7,19 @@ and this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ## [Unreleased]
 
+## [0.5.4] - 2026-10-18
+
+### Added
+
+- Added the latest icon assets and packaged ICO files to the repository.
+- Added an Extras tab with File Explorer integration for folders, folder backgrounds, and drives.
+- Added startup handling for a source path selected through File Explorer.
+
+### Changed
+
+- Switched the Windows installer to `DrLua sapphire blue app icon.ico` and selected `DrLua-app-icon.ico` for the main application.
+- Included application icons in Python package data and both Windows builds.
+
 ## [0.5.3] - 2026-10-18
 
 ### Added
@@ -133,7 +146,8 @@ and this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 - Import media from folders, Everything file lists, metadata CSV files, and Stash exports.
 - Provide an interactive Windows launcher, generated Lua file management, and Windows Explorer context menu integration.
 
-[Unreleased]: https://github.com/electblake/DrLua/compare/v0.5.3...HEAD
+[Unreleased]: https://github.com/electblake/DrLua/compare/v0.5.4...HEAD
+[0.5.4]: https://github.com/electblake/DrLua/compare/v0.5.3...v0.5.4
 [0.5.3]: https://github.com/electblake/DrLua/compare/v0.5.2...v0.5.3
 [0.5.2]: https://github.com/electblake/DrLua/compare/v0.5.1...v0.5.2
 [0.5.1]: https://github.com/electblake/DrLua/compare/v0.5.0...v0.5.1
