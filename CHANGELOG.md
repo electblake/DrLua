@@ -7,6 +7,10 @@ and this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ## [Unreleased]
 
+### Added
+
+- Added a Search Files field with live, case-insensitive filename filtering in the Files tab.
+
 ## [0.4.0] - 2026-10-18
 
 ### Added

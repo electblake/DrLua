@@ -189,6 +189,12 @@ class MainWindow(QMainWindow):
         label.setBuddy(self.save_directory)
         directory_layout.addRow(label, row)
         layout.addWidget(self.file_controls)
+        self.file_search = QLineEdit(objectName="searchFilesField")
+        self.file_search.setPlaceholderText("Search Files")
+        self.file_search.setAccessibleName("Search Files")
+        self.file_search.setClearButtonEnabled(True)
+        self.file_search.textChanged.connect(self.filter_files)
+        layout.addWidget(self.file_search)
         self.files = QListWidget(objectName="savedFilesList")
         self.files.setAccessibleName("Saved Lua files")
         self.files.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
@@ -217,6 +223,16 @@ class MainWindow(QMainWindow):
                 item = QListWidgetItem(path.name)
                 item.setData(Qt.ItemDataRole.UserRole, path.as_posix())
                 self.files.addItem(item)
+            self.filter_files()
+
+    def filter_files(self):
+        search = self.file_search.text().casefold()
+        for index in range(self.files.count()):
+            item = self.files.item(index)
+            hidden = search not in item.text().casefold()
+            if hidden:
+                item.setSelected(False)
+            item.setHidden(hidden)
 
     def copy_file_commands(self):
         commands = []
