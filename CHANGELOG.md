@@ -13,6 +13,10 @@ and this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 - Added a rename dialog with the current filename and Save and Cancel buttons, plus confirmation before deleting saved files.
 - Added a Search Files field with live, case-insensitive filename filtering in the Files tab.
 
+### Changed
+
+- Centered the README header with the DrLua image capped at 640px, app name and version, and a single tagline.
+
 ## [0.4.0] - 2026-10-18
 
 ### Added

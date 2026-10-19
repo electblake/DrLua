@@ -1,6 +1,10 @@
-# drlua v0.4.0
+<p align="center">
+  <img src="assets/Dr-Lua-color.png" alt="Dr. Lua" width="640" style="max-width: 640px; width: 100%; height: auto;">
+</p>
 
-Creates DaVinci Resolve Lua scripts and helps manage generated .lua files.
+<h1 align="center">DrLua v0.4.0</h1>
+
+<p align="center">Create and manage Lua scripts for DaVinci Resolve.</p>
 
 ## Desktop app
 
